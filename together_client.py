@@ -1,0 +1,655 @@
+import httpx
+import json
+import logging
+import re
+from urllib.parse import urlparse, unquote
+from functools import wraps
+import asyncio
+
+import config
+from utils import detect_language, _filter_duplicate_chunks, strip_think
+
+from together import AsyncTogether, error
+
+logger = logging.getLogger(__name__)
+
+# Initialize the asynchronous client
+client = AsyncTogether(api_key=config.TOGETHER_AI_API_KEY)
+
+# Shared state for rate limiting
+_rate_limit_state = {
+    "lock": asyncio.Lock(),
+    "until": 0,
+}
+
+def retry_on_server_error(retries=4, delay=2, backoff=2):
+    """A decorator to retry a function call on server-side (5xx) or rate limit errors."""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Check and wait if we are in a cooldown period
+            async with _rate_limit_state["lock"]:
+                wait_duration = _rate_limit_state["until"] - asyncio.get_event_loop().time()
+            
+            if wait_duration > 0:
+                logger.warning(f"Rate limit cooldown is active. Waiting for {wait_duration:.2f}s.")
+                await asyncio.sleep(wait_duration)
+
+            # Proceed with the retry loop
+            _retries = retries
+            _delay = delay
+
+            for attempt in range(_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (error.RateLimitError, error.ServiceUnavailableError, error.APIError, httpx.ReadTimeout) as e:
+                    # If this was the last attempt, re-raise the exception
+                    if attempt == _retries - 1:
+                        logger.error(f"Final attempt failed for {func.__name__}. Raising error.", exc_info=True)
+                        raise
+
+                    wait_time = _delay
+
+                    # For the second-to-last attempt, set a long delay
+                    if attempt == _retries - 2:
+                        wait_time = 60
+
+                    log_message = f"API error in `{func.__name__}`. Retrying in {wait_time:.2f}s... (Attempt {attempt + 1}/{_retries})"
+
+                    if isinstance(e, error.RateLimitError):
+                        wait_time = 60  # Rate limit wait always overrides other delays
+                        log_message = f"Rate limit hit for {func.__name__}. Waiting {wait_time}s... (Attempt {attempt + 1}/{_retries})"
+                        # Also set the shared cooldown
+                        async with _rate_limit_state["lock"]:
+                            _rate_limit_state["until"] = asyncio.get_event_loop().time() + wait_time
+                    
+                    logger.warning(log_message, exc_info=True)
+                    await asyncio.sleep(wait_time)
+
+                    # Only apply backoff for the initial, shorter retries
+                    if attempt < _retries - 2:
+                        _delay *= backoff
+        return wrapper
+    return decorator
+
+@retry_on_server_error()
+async def get_sub_queries(query: str, lang: str) -> list[str]:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+
+    prompt = f"""Based on the following query, generate up to 8 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. The majority of them should be in "{prompt_lang}" language, and a couple - in English. Return the sub-queries as a clean JSON list of strings without comments.
+
+Query from user: {query}"""
+    
+    logger.info(f"Together AI (sub-queries) - Prompt: {prompt}")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7, 
+            top_p=0.9
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (sub-queries) - Request failed: {e}")
+        raise
+
+    logger.info(f"Together AI (sub-queries) - Raw Response: {response_text}")
+    
+    sub_queries = []
+    try:
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            json_string = json_match.group(0)
+            json_string = re.sub(r"//.*", "", json_string)
+            json_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
+            sub_queries = json.loads(json_string)
+        else:
+             logger.warning("Together AI (sub-queries) - No JSON list found in the response.")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Together AI (sub-queries) - Could not decode JSON: {e}. Raw string was: {json_string if 'json_string' in locals() else ''}")
+        sub_queries = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
+        sub_queries = [item for sublist in sub_queries for item in sublist if item]
+
+    logger.info(f"Together AI (sub-queries) - Parsed Sub-queries: {sub_queries}")
+    return sub_queries
+
+
+@retry_on_server_error()
+async def get_research_steps(query: str, lang: str, entities_info: list) -> list[str]:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+
+    entity_context = ""
+    if entities_info:
+        entity_context = "\n\nDiscovered Entities:\n"
+        for entity in entities_info:
+            entity_context += f"- {entity['entity']}\n"
+
+    prompt = f"""You are a researcher. Break down the user's question into several logical research steps. Use the provided entity details to create more accurate and specific steps. In each step, instead of pronouns, be sure to indicate the full name of the object(s) of research. Also, in each step, keep the general context of the research (user's request). Do not refer to other steps or to the future results of other steps. If it is absolutely necessary to refer to other steps, then repeat the context of what was in the previous steps.
+
+Your response must be in the "{prompt_lang}" language.
+
+Return the steps as a clean JSON list of strings, with a maximum of 10 items in {prompt_lang} language. For example:
+[
+  "Check A",
+  "Review B",
+  "Compare A and B"
+]
+
+Query from user: {query}
+"""
+    if entity_context:
+        prompt += f"{entity_context} EACH QUESTION SHOULD CONTAIN AT LEAST ONE ENTITY NAME"
+    
+    logger.info(f"Together AI (research-steps) - Prompt: {prompt}")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            top_p=0.9
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (research-steps) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (research-steps) - Raw Response: {response_text}")
+    
+    steps = []
+    try:
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            json_string = json_match.group(0)
+            json_string = re.sub(r"//.*", "", json_string)
+            json_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
+            steps = json.loads(json_string)
+        else:
+             logger.warning("Together AI (research-steps) - No JSON list found in the response.")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Together AI (research-steps) - Could not decode JSON: {e}. Raw string was: {json_string if 'json_string' in locals() else ''}")
+        steps = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
+        steps = [item for sublist in steps for item in sublist if item]
+
+    logger.info(f"Together AI (research-steps) - Parsed Steps: {steps}")
+    return steps
+
+@retry_on_server_error()
+async def synthesize_research_answer(query: str, research_data: dict, lang: str) -> str:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+
+    formatted_research_data = ""
+    for step, summary in research_data.items():
+        formatted_research_data += f"### {step}\n"
+        formatted_research_data += f"{summary}\n\n"
+
+    prompt = f"""You are a chief editor. Your task is to generate an engaging introduction where you highlight some findings of the presented research and a concise TL;DR (Too Long; Didn't Read) summary for a research report based on the provided research items. Your ultimate goal is to help answer the user's query: "{query}".
+
+Your response MUST be in the "{prompt_lang}" language.
+
+Output your response in JSON format with two keys: "intro" and "tldr".
+
+Example JSON output:
+```json
+{{
+  "intro": "Your introduction here",
+  "tldr": "Your TL;DR summary here"
+}}
+```
+
+**Research Data (Summaries of each research item):**
+{formatted_research_data}
+"""
+    logger.info(f"Together AI (research-synthesis) - Prompt: {prompt}")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (research-synthesis) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (research-synthesis) - Response: {response_text}")
+    return response_text
+
+@retry_on_server_error()
+async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
+    # Define model and token limits
+    MODEL_CONTEXT_WINDOW = 8192
+    MAX_OUTPUT_TOKENS = 1200  # Reduced to leave more buffer
+    CHAR_PER_TOKEN_ESTIMATE = 3  # More conservative estimate
+
+    # --- 1. Construct the static parts of the prompt ---
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+
+    entity_context = ""
+    if entities_info:
+        entity_context = "\n\nDiscovered Entities and their details:\n"
+        for entity in entities_info:
+            entity_context += f"- Entity: {entity['entity']}\n"
+            if entity.get('description'):
+                entity_context += f"  Description: {entity['description']}\n"
+            if entity.get('lead_paragraph'):
+                entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
+            entity_context += f"  QID: {entity['qid']}\n"
+
+    # Base prompt template without the dynamic context
+    base_prompt_template = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed, structured, and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n\n**Instructions:**\n1. **Your response MUST be in the \"{prompt_lang}\" language, regardless of the language of the snippets.**\n2. Synthesize the information from all sub-queries to create a single, coherent answer to the main question.\n3. Information discovered in \"Discovered entities and their details\" is the most reliable, and it is your final source of truth.\n\n**Main Question:** {query}\n{entity_context}\n\n**Context from search results:**\n"""
+
+    # --- 2. Calculate available space for dynamic context ---
+    base_prompt_char_len = len(base_prompt_template) + len(query) # Also account for user query in messages
+    # Calculate the character limit for the snippets
+    max_context_char_limit = (MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS) * CHAR_PER_TOKEN_ESTIMATE - base_prompt_char_len
+
+    if max_context_char_limit <= 0:
+        raise ValueError("The base prompt, query, and entities are too long to fit any context.")
+
+    # --- 3. Build and truncate the dynamic context ---
+    contexts = []
+    for item in research_data:
+        sub_query = item['query']
+        snippets = item['snippets']
+        if not snippets:
+            continue
+        
+        unique_snippets = _filter_duplicate_chunks(snippets)
+        snippet_text = "\n".join([f"- {s.text}" for s in unique_snippets])
+        contexts.append(f"Sub-query: {sub_query}\nSnippets:\n{snippet_text}")
+
+    if not contexts:
+        return "Could not find relevant information."
+
+    formatted_contexts = "\n\n".join(contexts)
+    
+    if len(formatted_contexts) > max_context_char_limit:
+        logger.warning(f"Context length ({len(formatted_contexts)}) exceeds limit ({max_context_char_limit}). Truncating.")
+        formatted_contexts = formatted_contexts[:max_context_char_limit]
+        last_newline = formatted_contexts.rfind('\n')
+        if last_newline != -1:
+            formatted_contexts = formatted_contexts[:last_newline]
+
+    # --- 4. Assemble the final prompt and make the API call ---
+    final_prompt = base_prompt_template + formatted_contexts
+    
+    logger.info(f"Together AI (synthesis) - Final Prompt Length: {len(final_prompt)} chars")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_WEB_SEARCH,
+            messages=[
+                {"role": "system", "content": final_prompt},
+                {"role": "user", "content": query}
+            ],
+            temperature=0.3,
+            max_tokens=MAX_OUTPUT_TOKENS
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (synthesis) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (synthesis) - Response: {response_text}")
+    return response_text
+
+def contains_chinese(text: str) -> bool:
+    return bool(re.search(r'[\u4e00-\u9fff]', text))
+
+async def translate_if_needed(query: str, original_answer: str) -> str:
+    if not contains_chinese(original_answer):
+        return original_answer
+
+    logger.warning(f"Together AI (prompt_without_context) - Chinese detected in response: {original_answer}")
+    detected_language = detect_language(query)
+    logger.info(f"Detected query language: {detected_language}")
+
+    translation_prompt = f'''Answer the user\'s question in the {detected_language} language. User\'s question: "{query}".'''
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_MODEL,
+            messages=[{"role": "user", "content": translation_prompt}],
+            temperature=0.3,
+            top_k=50,
+            top_p=0.9,
+            frequency_penalty=0.2,
+            repetition_penalty=1.1,
+            max_tokens=1024
+        )
+        translated_answer = response.choices[0].message.content.strip()
+        logger.info(f"Together AI (prompt_without_context) - Translated answer: {translated_answer}")
+        return translated_answer
+    except Exception as e:
+        logger.error(f"Together AI (prompt_without_context) - Translation failed: {e}")
+        raise
+
+@retry_on_server_error()
+async def prompt_without_context(query: str, lang: str, model: str = None, params: dict = None) -> str:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+
+    prompt = f"""You are a helpful AI assistant. Always answer in the "{prompt_lang}" language!
+    
+Question from the user: {query}
+"""
+    
+    final_model = model if model is not None else config.TOGETHER_MODEL
+    final_params = params if params is not None else {
+        "temperature": 0.3, "top_k": 50, "top_p": 0.9, 
+        "frequency_penalty": 0.2, "max_tokens": 1024, "repetition_penalty": 1.1
+    }
+
+    logger.info(f"Together AI (prompt_without_context-fallback-no-context) - Prompt: {prompt}")
+    try:
+        # Use a dictionary to hold keyword arguments for the API call
+        api_params = {
+            "model": final_model,
+            "messages": [{"role": "user", "content": prompt}],
+            **final_params
+        }
+        response = await client.chat.completions.create(
+            **api_params
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (prompt_without_context) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (prompt_without_context) - Response: {response_text}")
+    final_answer = await translate_if_needed(query, response_text)
+    return final_answer
+
+@retry_on_server_error()
+async def fast_reply(query: str, lang: str, available_modes: list, translated_mode_names: dict) -> str:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+
+    system_prompt = f"""Your name is Brainy. You are a Telegram bot, but you also have a website: https://askbrainy.com. You are a helpful AI assistant built with free, open-source tools. Your creator's Telegram nickname is @bonbekon. You will always be accessible for free. The core idea behind you is to combine a fast, open-source Large Language Models with real-time context from the internet (a technique called RAG) to provide answers comparable in quality to proprietary models like ChatGPT. Your advantages vs other free AI tools: fast responses to easy everyday questions, actual and unbiased information, free unlimited deep research.
+
+Your goal is to give THE SHORTEST and MOST PRECISE answer possible. No more than 50 words in total. If a more detailed answer is absolutely required, suggest using other modes. Always answer in the "{prompt_lang}" language.
+
+If you cannot provide a short and precise answer, you MUST explicitly state that you cannot and advise the user to use a more suitable mode:
+- **{translated_mode_names['web_search']}:** Use this for easy questions that need up-to-date information.
+- **{translated_mode_names['deep_search']}:** For more complex questions that do not require deep analysis.
+- **{translated_mode_names['deep_research']}:** For complex research or analysis.
+- **🧠 DeepSeek R1** for coding, writing, logical thinking.
+"""
+    user_prompt = f"{query}"
+
+    payload = {
+        "model": config.TOGETHER_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.3,
+        "top_k": 50,
+        "top_p": 0.9,
+        "repetition_penalty": 1.1,
+        "max_tokens": 200
+    }
+    logger.info(f"Together AI (fast-reply) - System Prompt: {system_prompt}")
+    logger.info(f"Together AI (fast-reply) - User Prompt: {user_prompt}")
+    try:
+        response = await client.chat.completions.create(
+            **payload
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (fast-reply) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (fast-reply) - Response: {response_text}")
+    return response_text
+
+@retry_on_server_error()
+async def generate_answer_from_serp(query: str, snippets: list, lang: str, translator, entities_info: list) -> str:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+    logger.info(f"Received snippets for LLM: {snippets}")
+
+    unique_snippets_for_ranking = _filter_duplicate_chunks(snippets)
+    sorted_snippets = sorted(unique_snippets_for_ranking, key=lambda s: len(s.text), reverse=True)
+
+    top_sources = []
+    seen_urls = set()
+    for s in sorted_snippets:
+        if s.source_url not in seen_urls:
+            top_sources.append(s.source_url)
+            seen_urls.add(s.source_url)
+        if len(top_sources) >= 3:
+            break
+
+    snippets_by_domain = {}
+    for s in snippets:
+        if len(s.text) < 70:
+            continue
+        domain = urlparse(s.source_url).netloc
+        if domain not in snippets_by_domain:
+            snippets_by_domain[domain] = []
+        snippets_by_domain[domain].append(s.text)
+
+    snippet_texts = []
+    for domain, texts in snippets_by_domain.items():
+        combined_text = " ".join(texts)
+        snippet_texts.append(f"- {combined_text} [{domain}]")
+
+    snippet_text = "\n\n".join(snippet_texts)
+
+    entity_context = ""
+    if entities_info:
+        entity_context = "\n\nDiscovered Entities and their details:\n"
+        for entity in entities_info:
+            entity_context += f"- Entity: {entity['entity']}\n"
+            if entity['description']:
+                entity_context += f"  Description: {entity['description']}\n"
+            if entity['lead_paragraph']:
+                entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
+            entity_context += f"  QID: {entity['qid']}\n"
+
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 10-200 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\nContext snippets: {snippet_text}"""
+    
+    logger.info(f"Together AI (generate_answer_from_serp) - Prompt: {prompt}")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=550
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (generate_answer_from_serp) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (generate_answer_from_serp) - Response: {response_text}")
+    final_answer = response_text
+
+    if top_sources:
+        final_answer += f"\n\n{translator.get_string("sources_label", lang)}:\n"
+        for i, url in enumerate(top_sources):
+            final_answer += f"{i+1}. {unquote(url)}\n"
+
+    return final_answer
+
+@retry_on_server_error()
+async def generate_summary_from_chunks(query: str, snippets: list, lang: str, translator, entities_info: list) -> str:
+    detected_user_lang = detect_language(query)
+    prompt_lang = 'en' if detected_user_lang == 'en' else lang
+    logger.info(f"Received snippets for LLM summary: {snippets}")
+
+    unique_snippets_for_ranking = _filter_duplicate_chunks(snippets)
+
+    snippets_by_domain = {}
+    for s in unique_snippets_for_ranking:
+        if len(s.text) < 70:
+            continue
+        source_identifier = s.source_url # Use the full URL
+        if source_identifier not in snippets_by_domain:
+            snippets_by_domain[source_identifier] = []
+        snippets_by_domain[source_identifier].append(s.text)
+
+    snippet_texts = []
+    for source_id, texts in snippets_by_domain.items():
+        combined_text = " ".join(texts)
+        snippet_texts.append(f"- {combined_text} [Source: {source_id}]") # Use the full URL in the prompt
+
+    snippet_text = "\n\n".join(snippet_texts)
+
+    entity_context = ""
+    if entities_info:
+        entity_context = "\n\nDiscovered Entities and their details:\n"
+        for entity in entities_info:
+            entity_context += f"- Entity: {entity['entity']}\n"
+            if entity['description']:
+                entity_context += f"  Description: {entity['description']}\n"
+            if entity['lead_paragraph']:
+                entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
+            entity_context += f"  QID: {entity['qid']}\n"
+
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n{entity_context}\n\nRules: 1. Max output should be around 400-600 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Do not add any information not present in the snippets. 5. Stick closer to the language and style of provided context snippets. 6. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 7. **Crucially, cite your sources in square brackets (strictly follow this format: "[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)") directly within the text where the information is used.**\nContext snippets: {snippet_text}"""
+    
+    logger.info(f"Together AI (generate_summary_from_chunks) - Prompt: {prompt}")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": query}
+            ],
+            temperature=0.2,
+            max_tokens=800
+        )
+        response_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (generate_summary_from_chunks) - Request failed: {e}")
+        raise
+    
+    logger.info(f"Together AI (generate_summary_from_chunks) - Response: {response_text}")
+    return response_text
+
+@retry_on_server_error()
+async def deepseek_r1_reply(query: str, lang: str) -> str:
+    try:
+        system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language."
+        response = await client.chat.completions.create(
+            model=config.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ],
+            max_tokens=4000 # Added max_tokens
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Together AI (DeepSeek R1) - Request failed: {e}")
+        raise
+
+@retry_on_server_error()
+async def polish_research_answer(summaries: str, query: str, lang: str, translator) -> str:
+    """Takes a list of summaries and synthesizes the final answer, truncating if necessary."""
+    # --- 1. Define constants and strip think tags ---
+    summaries = strip_think(summaries) # CRITICAL: Strip think tags first
+    MODEL_CONTEXT_WINDOW = 8192
+    MAX_OUTPUT_TOKENS = 4000
+    CHAR_PER_TOKEN_ESTIMATE = 3 # Conservative estimate
+
+    # --- 2. Calculate available space for summaries ---
+    prompt_template = f"""You are a chief researcher. Answer the user's query based on the research data provided to you. 
+
+**User Query:** {query}
+
+**Research Data (Summaries):**
+{summaries}
+
+**Rules:**
+1. Crucially, cite your sources in the following format "[https://example.com/page](https://example.com/page)" directly within the text where the information is used.
+2. List facts from junior researchers, check them for any contradictions, and only then compose the detailed final answer.
+3. Your final answer should be very detailed, complete, coherent, and well-structured
+4. Minimal desired output is 500 words. The more the better. Max allowed output is 4000 words.
+5. Stick closer to the language and style of provided context snippets.
+6. Readability: One to three lines per paragraph. One idea per sentence. Don’t be afraid of sentence fragments. (e.g., “It’s more effective. And easier to read.”). Use punchy phrases that grab a skimming reader and hand them off to the next line to keep people engaged:
+In other words…
+Which means:
+Why?
+Why not?
+Here’s why.
+For example:
+Like this:
+However:
+On the other hand…
+Important:
+
+EXAMPLE:
+
+Not great:
+
+“Adding recognizable customer logos, star ratings, and short testimonials to a landing page builds trust and reduces perceived risk, which lowers friction in the decision process and typically improves click-through rates on calls-to-action.”
+
+Better:
+
+"Social proof lowers friction on landing pages.
+
+Here’s why:
+
+Logos, ratings, and quick testimonials answer “Is this legit?” fast—so more visitors keep reading and more of them click the CTA."
+
+7. Your final answer must be in the "{lang}" language."""
+    
+    base_prompt_len = len(prompt_template.format(summaries=''))
+    max_summaries_len = (MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS) * CHAR_PER_TOKEN_ESTIMATE - base_prompt_len
+
+    # --- 3. Truncate summaries if they are too long ---
+    if len(summaries) > max_summaries_len:
+        logger.warning(f"Summaries length ({len(summaries)}) exceeds limit ({max_summaries_len}). Truncating.")
+        summaries = summaries[:max_summaries_len]
+
+    # --- 4. Final API Call ---
+    final_prompt = prompt_template.format(summaries=summaries)
+
+    logger.info(f"Together AI (polish-research) - Final prompt to be sent: {final_prompt}")
+    logger.info(f"Together AI (polish-research) - Prompting to synthesize final answer. Final summaries length: {len(summaries)} chars.")
+    try:
+        response = await client.chat.completions.create(
+            model=config.TOGETHER_DEEPSEEK,
+            messages=[{"role": "user", "content": final_prompt}],
+            temperature=0.5,
+            max_tokens=MAX_OUTPUT_TOKENS
+        )
+        polished_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (polish-research) - Request failed: {e}")
+        return "Error: Could not generate the final research answer."
+    
+    logger.info(f"Together AI (polish-research) - Final answer received.")
+    return polished_text
+
+@retry_on_server_error()
+async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
+    """Summarizes a single chunk of research data in the context of the user's query."""
+    prompt = f"""You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and wel-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
+
+Provide only the summary of the text below, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets: their domains or full urls if available.
+
+**Research Draft Chunk:**
+
+{chunk}"""
+
+    logger.info(f"Together AI (summarize-chunk) - Prompting to summarize chunk of length {len(chunk)}.")
+    try:
+        response = await client.chat.completions.create(
+            model=config.DEEPSEEK_MODEL, # Use the specified summarizer model
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2, # Factual summarization
+            max_tokens=4000 # Allow for a decent summary length, but not too long
+        )
+        summary = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Together AI (summarize-chunk) - Request failed: {e}")
+        return "" # Return an empty string if summarization fails
+    
+    logger.info(f"Together AI (summarize-chunk) - Summary received.")
+    return summary
