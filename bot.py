@@ -535,7 +535,6 @@ async def fast_web_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, q
         logger.error("Error in Fast Web mode:", exc_info=True)
         await update.message.reply_text(translator.get_string("error_generic", lang))
         await show_mode_menu(context, update.effective_chat.id)
-        await show_mode_menu(context, update.effective_chat.id)
 
 async def deep_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     lang = context.chat_data.get('language', 'en')
@@ -545,7 +544,6 @@ async def deep_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(translator.get_string("deep_search_start_message", lang))
     context.chat_data['mode'] = 'fast_reply'
-    await show_mode_menu(context, update.effective_chat.id) # Show keyboard immediately
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     try:
         async with llm_semaphore:
@@ -674,7 +672,7 @@ async def deep_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             disable_web_page_preview=True,
         )
         context.chat_data['mode'] = 'fast_reply'
-        # await show_mode_menu(context, update.effective_chat.id) # Removed redundant call
+        await show_mode_menu(context, update.effective_chat.id)
     except Exception as e:
         logger.error("Error in Deep Search:", exc_info=True)
         await update.message.reply_text(translator.get_string("error_generic", lang))
