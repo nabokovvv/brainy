@@ -18,6 +18,8 @@ from telegram.error import BadRequest
 import telegram.error
 import os
 import textwrap
+import whisper
+import torch
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import py3langid
@@ -57,6 +59,7 @@ import json
 import os
 from datetime import datetime
 import hashlib
+import tempfile
 from urllib.parse import unquote
 
 # ---------------------------------------------------------------------------#
@@ -841,6 +844,51 @@ async def deep_research_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(translator.get_string("error_generic", lang))
         await show_mode_menu(context, update.effective_chat.id)
 
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if 'language' not in context.chat_data:
+        await start(update, context)
+        return
+
+    # Send an animated hourglass emoji as a status indicator
+    status_message = await context.bot.send_message(chat_id, "⏳")
+
+    try:
+        voice = update.message.voice
+        with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
+            voice_file = await voice.get_file()
+            await voice_file.download_to_drive(temp_audio_file.name)
+            
+            whisper_model = context.application.bot_data["whisper_model"]
+            lang = context.chat_data.get('language', 'en')
+            result = await asyncio.to_thread(whisper_model.transcribe, temp_audio_file.name, language=lang, beam_size=3, temperature=0.0, condition_on_previous_text=True)
+            transcribed_text = result["text"]
+    finally:
+        # Delete the hourglass message once transcription is done
+        await context.bot.delete_message(chat_id, status_message.message_id)
+
+    if transcribed_text:
+        # Send the transcribed text back to the user
+        await context.bot.send_message(chat_id, transcribed_text)
+
+        # Add message to buffer and store the latest update object
+        buffer = user_message_buffers.setdefault(chat_id, [])
+        buffer.append(transcribed_text)
+        user_last_update[chat_id] = update
+
+        # If a job is already scheduled for this user, remove it
+        if chat_id in user_job_trackers:
+            user_job_trackers[chat_id].schedule_removal()
+
+        # Schedule the processing job
+        new_job = context.job_queue.run_once(
+            process_buffered_messages,
+            when=0.8,  # 0.8-second delay (adjust as needed)
+            chat_id=chat_id,
+            name=f"process-msg-{chat_id}"
+        )
+        user_job_trackers[chat_id] = new_job
+
 async def fast_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     lang = context.chat_data.get('language', 'en')
     translator = context.application.bot_data['translator']
@@ -1303,6 +1351,7 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
 # ---------------------------------------------------------------------------#
 
 async def main_async() -> None:
+    torch.set_num_threads(4)
     translator = Translator('translations.json')
     request_queue = asyncio.PriorityQueue()
     llm_semaphore = asyncio.Semaphore(5)
@@ -1310,6 +1359,9 @@ async def main_async() -> None:
     logger.info("Loading reranker model...")
     reranker_instance = reranker.Reranker(config.RERANK_MODEL)
     logger.info("Reranker model loaded.")
+    logger.info("Loading whisper model...")
+    whisper_model = whisper.load_model("base")
+    logger.info("Whisper model loaded.")
     worker_count = 3
 
     application = (
@@ -1326,10 +1378,12 @@ async def main_async() -> None:
     application.bot_data["request_queue"] = request_queue
     application.bot_data["llm_semaphore"] = llm_semaphore
     application.bot_data["reranker"] = reranker_instance # Add reranker to bot_data
+    application.bot_data["whisper_model"] = whisper_model
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
 
     workers = [
         asyncio.create_task(worker(f"Worker-{i+1}", request_queue, application.bot_data))
