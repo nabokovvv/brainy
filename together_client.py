@@ -9,6 +9,8 @@ import math
 import time
 import config
 from utils import detect_language, _filter_duplicate_chunks, strip_think
+from httpx import ReadTimeout, ConnectTimeout, ConnectError, RemoteProtocolError
+
 
 from together import AsyncTogether, error
 
@@ -103,8 +105,10 @@ async def _chat_once(*, model: str, messages: list, **kwargs) -> dict:
     }
     payload = {"model": model, "messages": messages}
     payload.update(kwargs)
-    timeout = kwargs.pop("timeout", 60)
-
+    timeout = kwargs.pop(
+        "timeout",
+        httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=60.0)
+    )
     async with httpx.AsyncClient(timeout=timeout) as ac:
         resp = await ac.post(API_URL, headers=headers, json=payload)
         lr = {k:v for k,v in resp.headers.items() if k.lower().startswith(("x-rate","retry-after"))}
@@ -135,7 +139,16 @@ async def chat_with_fallback(*, model: str | None = None, messages: list, immedi
     try:
         logger.info(f"[LLM] primary={primary} secondary={secondary}")
         return await _chat_once(model=primary, messages=messages, **gen_kwargs)
-    except (error.RateLimitError, error.ServiceUnavailableError, httpx.ReadTimeout):
+    except (error.RateLimitError,
+            error.ServiceUnavailableError,
+            httpx.ReadTimeout,
+            httpx.ConnectTimeout,
+            httpx.ConnectError,
+            httpx.RemoteProtocolError):
+        # помечаем первичную модель как «занятую» на пару секунд, чтобы планировщик не дёргал её тут же
+        now = asyncio.get_event_loop().time()
+        async with _model_lock:
+            _model_next_ok[primary] = max(_model_next_ok.get(primary, 0.0), now + 3.0)
         if immediate_on_429:
             logger.warning(f"[LLM] {primary} limited/unavailable; fallback -> {secondary}")
             return await _chat_once(model=secondary, messages=messages, **gen_kwargs)
@@ -170,7 +183,7 @@ def retry_on_server_error(retries=4, delay=2, backoff=2):
             for attempt in range(_retries):
                 try:
                     return await func(*args, **kwargs)
-                except (error.RateLimitError, error.ServiceUnavailableError, error.APIError, httpx.ReadTimeout) as e:
+                except (error.RateLimitError, error.ServiceUnavailableError, error.APIError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
                     # If this was the last attempt, re-raise the exception
                     if attempt == _retries - 1:
                         logger.error(f"Final attempt failed for {func.__name__}. Raising error.", exc_info=True)

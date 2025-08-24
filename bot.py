@@ -111,9 +111,6 @@ PH_MINUS = '\uFFF1'; PH_PLUS = '\uFFF2'; PH_STAR = '\uFFF3'; PH_QUOTE = '\uFFF4'
 PH_BOPEN = '\uFFF6'; PH_BCLOSE = '\uFFF7'
 PH_LB = '\uFFCA'; PH_RB = '\uFFCB'; PH_LP = '\uFFCC'; PH_RP = '\uFFCD'  # [ ] ( ) в ссылках
 
-def strip_think(text: str) -> str:
-    return re.sub(r'<think>.*?</think>', '', text, flags=re.S | re.I).strip()
-
 def normalize(text: str) -> str:
     if not text: return text
     return (text.replace('\u00A0',' ').replace('\u202F',' ').replace('\u2009',' ')
