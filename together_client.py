@@ -5,7 +5,8 @@ import re
 from urllib.parse import urlparse, unquote
 from functools import wraps
 import asyncio
-
+import math
+import time
 import config
 from utils import detect_language, _filter_duplicate_chunks, strip_think
 
@@ -13,6 +14,133 @@ from together import AsyncTogether, error
 
 logger = logging.getLogger(__name__)
 
+
+# === Header-aware rate limiter & free-model fallback ===
+LLAMA_FREE = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free"
+DEEPSEEK_FREE = "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free"
+API_URL = "https://api.together.xyz/v1/chat/completions"
+
+def _other_free(model_str: str) -> str:
+    m = (model_str or "").lower()
+    if "deepseek" in m:
+        return LLAMA_FREE
+    if "llama" in m or "meta-llama" in m:
+        return DEEPSEEK_FREE
+    # default fallback if unknown
+    return DEEPSEEK_FREE
+
+
+_model_next_ok = {}
+_model_lock = asyncio.Lock()
+
+def _headers_lower(h):
+    try:
+        return {k.lower(): v for k, v in h.items()}
+    except Exception:
+        return {}
+
+def _parse_rate_headers(h) -> dict:
+    hl = _headers_lower(h)
+    def _f(key, default=None, cast=float):
+        try:
+            return cast(hl.get(key, default))
+        except Exception:
+            return default
+    return {
+        "limit_rps": _f("x-ratelimit-limit", 0.05),
+        "remaining": _f("x-ratelimit-remaining", 0, int),
+        "reset_s":   _f("x-ratelimit-reset", None),
+        "retry_after": _f("retry-after", None),
+    }
+
+def _get_next_ok(model: str) -> float:
+    return _model_next_ok.get(model, 0.0)
+
+def _choose_model_prefer_llama() -> str:
+    """Choose the model with sooner availability; prefer Llama if both ready now."""
+    now = asyncio.get_event_loop().time()
+    llama_ready_in = max(0.0, _get_next_ok(LLAMA_FREE) - now)
+    deep_ready_in  = max(0.0, _get_next_ok(DEEPSEEK_FREE) - now)
+    if llama_ready_in == 0 and deep_ready_in == 0:
+        return LLAMA_FREE
+    return LLAMA_FREE if llama_ready_in <= deep_ready_in else DEEPSEEK_FREE
+
+async def _wait_if_needed(model: str):
+    now = asyncio.get_event_loop().time()
+    async with _model_lock:
+        t = _model_next_ok.get(model, 0.0)
+    if t > now:
+        await asyncio.sleep(t - now)
+
+async def _respect_headers(model: str, headers, pace_after_success: bool = True):
+    meta = _parse_rate_headers(headers)
+    limit_rps = meta.get("limit_rps") or 0.05
+    remaining = meta.get("remaining")
+    reset_s   = meta.get("reset_s")
+    retry_after = meta.get("retry_after")
+
+    now = asyncio.get_event_loop().time()
+    async with _model_lock:
+        next_ok = _model_next_ok.get(model, now)
+
+    delay = 0.0
+    if remaining is not None and remaining <= 0:
+        base = reset_s if reset_s is not None else (1.0/limit_rps if limit_rps > 0 else 2.0)
+        delay = max(math.ceil(base) + 0.5, (retry_after or 0.0))
+    elif pace_after_success and limit_rps and limit_rps > 0:
+        delay = max(delay, 1.0/limit_rps)
+
+    if delay > 0:
+        async with _model_lock:
+            _model_next_ok[model] = max(next_ok, now + delay)
+
+async def _chat_once(*, model: str, messages: list, **kwargs) -> dict:
+    """Raw Together call that obeys per-second headers. Returns JSON dict."""
+    await _wait_if_needed(model)
+    headers = {
+        "Authorization": f"Bearer {config.TOGETHER_AI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {"model": model, "messages": messages}
+    payload.update(kwargs)
+    timeout = kwargs.pop("timeout", 60)
+
+    async with httpx.AsyncClient(timeout=timeout) as ac:
+        resp = await ac.post(API_URL, headers=headers, json=payload)
+        lr = {k:v for k,v in resp.headers.items() if k.lower().startswith(("x-rate","retry-after"))}
+        logger.info(f"[LLM] <- {model} {resp.status_code}; rate_headers={lr}")
+        await _respect_headers(model, resp.headers, pace_after_success=(resp.status_code==200))
+        if resp.status_code == 200:
+            return resp.json()
+        elif resp.status_code in (429, 503):
+            await _respect_headers(model, resp.headers, pace_after_success=False)
+            try:
+                body = resp.json()
+            except Exception:
+                body = {"text": resp.text[:500]}
+            if resp.status_code == 429:
+                raise error.RateLimitError(str(body))
+            raise error.ServiceUnavailableError(str(body))
+        else:
+            resp.raise_for_status()
+
+async def chat_with_fallback(*, model: str | None = None, messages: list, immediate_on_429: bool = True, **gen_kwargs) -> dict:
+    """Use the caller-provided `model` as PRIMARY; on 429/503/timeout, immediately try the OTHER free model.
+    If `model` is None, choose based on readiness (preferring Llama when both are free)."""
+    # Pop model from kwargs if it came via **payload
+    if model is None and 'model' in gen_kwargs:
+        model = gen_kwargs.pop('model')
+    primary = model or _choose_model_prefer_llama()
+    secondary = _other_free(primary)
+    try:
+        logger.info(f"[LLM] primary={primary} secondary={secondary}")
+        return await _chat_once(model=primary, messages=messages, **gen_kwargs)
+    except (error.RateLimitError, error.ServiceUnavailableError, httpx.ReadTimeout):
+        if immediate_on_429:
+            logger.warning(f"[LLM] {primary} limited/unavailable; fallback -> {secondary}")
+            return await _chat_once(model=secondary, messages=messages, **gen_kwargs)
+        raise
+# === End header-aware layer ===
 # Initialize the asynchronous client
 client = AsyncTogether(api_key=config.TOGETHER_AI_API_KEY)
 
@@ -83,13 +211,12 @@ Query from user: {query}"""
     
     logger.info(f"Together AI (sub-queries) - Prompt: {prompt}")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_MODEL,
+        response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7, 
             top_p=0.9
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (sub-queries) - Request failed: {e}")
         raise
@@ -144,13 +271,12 @@ Query from user: {query}
     
     logger.info(f"Together AI (research-steps) - Prompt: {prompt}")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_MODEL,
+        response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             top_p=0.9
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (research-steps) - Request failed: {e}")
         raise
@@ -204,12 +330,11 @@ Example JSON output:
 """
     logger.info(f"Together AI (research-synthesis) - Prompt: {prompt}")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_MODEL,
+        response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (research-synthesis) - Request failed: {e}")
         raise
@@ -279,7 +404,7 @@ async def synthesize_answer(query: str, research_data: list, lang: str, entities
     
     logger.info(f"Together AI (synthesis) - Final Prompt Length: {len(final_prompt)} chars")
     try:
-        response = await client.chat.completions.create(
+        response = data = await _chat_once(
             model=config.TOGETHER_WEB_SEARCH,
             messages=[
                 {"role": "system", "content": final_prompt},
@@ -288,7 +413,7 @@ async def synthesize_answer(query: str, research_data: list, lang: str, entities
             temperature=0.3,
             max_tokens=MAX_OUTPUT_TOKENS
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (synthesis) - Request failed: {e}")
         raise
@@ -309,8 +434,7 @@ async def translate_if_needed(query: str, original_answer: str) -> str:
 
     translation_prompt = f'''Answer the user\'s question in the {detected_language} language. User\'s question: "{query}".'''
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_MODEL,
+        response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": translation_prompt}],
             temperature=0.3,
             top_k=50,
@@ -350,10 +474,10 @@ Question from the user: {query}
             "messages": [{"role": "user", "content": prompt}],
             **final_params
         }
-        response = await client.chat.completions.create(
+        response = data = await _chat_once(
             **api_params
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (prompt_without_context) - Request failed: {e}")
         raise
@@ -389,15 +513,13 @@ If you cannot provide a short and precise answer, you MUST explicitly state that
         "top_k": 50,
         "top_p": 0.9,
         "repetition_penalty": 1.1,
-        "max_tokens": 200
+        "max_tokens": 400
     }
     logger.info(f"Together AI (fast-reply) - System Prompt: {system_prompt}")
     logger.info(f"Together AI (fast-reply) - User Prompt: {user_prompt}")
     try:
-        response = await client.chat.completions.create(
-            **payload
-        )
-        response_text = response.choices[0].message.content.strip()
+        response = data = await chat_with_fallback(**payload)
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (fast-reply) - Request failed: {e}")
         raise
@@ -454,13 +576,12 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
     
     logger.info(f"Together AI (generate_answer_from_serp) - Prompt: {prompt}")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_MODEL,
+        response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            max_tokens=550
+            max_tokens=1200
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (generate_answer_from_serp) - Request failed: {e}")
         raise
@@ -514,8 +635,7 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
     
     logger.info(f"Together AI (generate_summary_from_chunks) - Prompt: {prompt}")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_MODEL,
+        response = data = await chat_with_fallback(
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": query}
@@ -523,7 +643,7 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
             temperature=0.2,
             max_tokens=800
         )
-        response_text = response.choices[0].message.content.strip()
+        response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (generate_summary_from_chunks) - Request failed: {e}")
         raise
@@ -535,15 +655,14 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
 async def deepseek_r1_reply(query: str, lang: str) -> str:
     try:
         system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language."
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_DEEPSEEK,
+        response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": query}
             ],
             max_tokens=4000 # Added max_tokens
         )
-        return response.choices[0].message.content
+        return strip_think(data['choices'][0]['message']['content'])
     except Exception as e:
         logger.error(f"Together AI (DeepSeek R1) - Request failed: {e}")
         raise
@@ -613,8 +732,7 @@ Logos, ratings, and quick testimonials answer “Is this legit?” fast—so mor
     logger.info(f"Together AI (polish-research) - Final prompt to be sent: {final_prompt}")
     logger.info(f"Together AI (polish-research) - Prompting to synthesize final answer. Final summaries length: {len(summaries)} chars.")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_DEEPSEEK,
+        response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK,
             messages=[{"role": "user", "content": final_prompt}],
             temperature=0.5,
             max_tokens=MAX_OUTPUT_TOKENS
@@ -640,13 +758,12 @@ Provide only the summary of the text below, with no extra comments or introducti
 
     logger.info(f"Together AI (summarize-chunk) - Prompting to summarize chunk of length {len(chunk)}.")
     try:
-        response = await client.chat.completions.create(
-            model=config.TOGETHER_DEEPSEEK, # Use the specified summarizer model
+        response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK, # Use the specified summarizer model
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2, # Factual summarization
             max_tokens=4000 # Allow for a decent summary length, but not too long
         )
-        summary = response.choices[0].message.content.strip()
+        summary = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
         logger.error(f"Together AI (summarize-chunk) - Request failed: {e}")
         return "" # Return an empty string if summarization fails

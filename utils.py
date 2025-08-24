@@ -61,9 +61,41 @@ def translate_string(text_key: str, lang: str) -> str:
     """
     return TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(text_key, text_key)
 
+# Допустимые имена "мысленных" тегов
+_THINK_TAGS = r"(think|analysis|reasoning|scratchpad|chain[_\-\s]?of[_\-\s]?thought)"
+
+# Полноценный блок: <think ...> ... </think> (регистр/пробелы/переносы не мешают)
+_THINK_BLOCK = re.compile(
+    rf"<\s*{_THINK_TAGS}\b[^>]*>\s*.*?\s*<\s*/\s*\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Осиротевший открывающий тег до конца текста
+_THINK_OPEN_TO_EOF = re.compile(
+    rf"<\s*{_THINK_TAGS}\b[^>]*>\s*.*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Одиночный открывающий тег
+_THINK_OPEN = re.compile(
+    rf"<\s*{_THINK_TAGS}\b[^>]*>",
+    re.IGNORECASE,
+)
+
 def strip_think(text: str) -> str:
-    """Removes <think> tags from a string."""
-    return re.sub(r'<think>.*?</think>', '', text, flags=re.S | re.I).strip()
+    if not isinstance(text, str):
+        return text
+    # 1) Снимаем корректно закрытые блоки. Повторяем, если их несколько.
+    prev = None
+    while prev != text:
+        prev = text
+        text = _THINK_BLOCK.sub("", text)
+    # 2) Если остался осиротевший открывающий тег — срезаем до конца
+    text = _THINK_OPEN_TO_EOF.sub("", text)
+    # 3) Убираем одиночные открывающие теги, если вдруг остались
+    text = _THINK_OPEN.sub("", text)
+    return text.strip()
+
 
 def detect_language(text: str) -> str:
     """Detects the language of the given text using py3langid."""
