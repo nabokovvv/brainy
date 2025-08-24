@@ -23,8 +23,8 @@
     "sources_label": "Sources",
     "error_fast_reply_empty": "I couldn't provide a fast answer. Select another mode or rephrase.",
     "error_fast_reply_chinese": "Fast Mode didn’t work. Please try a different mode.",
-    "deep_research_start_message": "Deep Research may take 10-15 minutes. I’ll notify you when it’s done.",
-    "deep_search_start_message": "I’m searching online now and will be back in 2-3 minutes with what I find.",
+    "deep_research_start_message": "Deep Research may take 30 minutes. I’ll notify you when it’s done.",
+    "deep_search_start_message": "I’m searching online now and will be back in 5 minutes with what I find.",
     "trying_fast_reply": "Trying fast reply mode..."
   },
   "es": {
@@ -51,8 +51,8 @@
     "sources_label": "Fuentes",
     "error_fast_reply_empty": "No pude dar una respuesta rápida. Elige otro modo o reformula.",
     "error_fast_reply_chinese": "El Modo Rápido no funcionó. Por favor, intenta elegir otro modo.",
-    "deep_research_start_message": "Deep Research puede tardar 10–15 minutos. Te avisaré cuando esté listo.",
-    "deep_search_start_message": "Estoy buscando información en internet. Volveré con resultados en 2-3 minutos.",
+    "deep_research_start_message": "Deep Research puede tardar 30 minutos. Te avisaré cuando esté listo.",
+    "deep_search_start_message": "Estoy buscando información en internet. Volveré con resultados en 5 minutos.",
     "trying_fast_reply": "Probando el modo de respuesta rápida..."
   },
   "ru": {
@@ -79,8 +79,8 @@
     "sources_label": "Источники",
     "error_fast_reply_empty": "Не удалось быстро ответить. Выберите другой режим или переформулируйте вопрос.",
     "error_fast_reply_chinese": "Быстрый режим не сработал. Пожалуйста, попробуйте выбрать другой режим.",
-    "deep_research_start_message": "Глубокое исследование займёт 10–15 минут. Сообщу, когда будет готово.",
-    "deep_search_start_message": "Ищу информацию в интернете. Вернусь с результатами через 2-3 минуты.",
+    "deep_research_start_message": "Глубокое исследование займёт 30 минут. Сообщу, когда будет готово.",
+    "deep_search_start_message": "Ищу информацию в интернете. Вернусь с результатами через 5 минут.",
     "trying_fast_reply": "Пробую режим быстрого ответа..."
   },
   "pt": {
@@ -107,8 +107,8 @@
     "sources_label": "Fontes",
     "error_fast_reply_empty": "Não consegui responder rapidamente. Escolha outro modo ou reformule.",
     "error_fast_reply_chinese": "O Modo Rápido não funcionou. Por favor, tente escolher outro modo.",
-    "deep_research_start_message": "Deep Research pode levar de 10 a 15 minutos. Avisarei quando estiver pronto.",
-    "deep_search_start_message": "Estou buscando informações na internet. Voltarei com resultados em 2-3 minutos.",
+    "deep_research_start_message": "Deep Research pode levar de 30 minutos. Avisarei quando estiver pronto.",
+    "deep_search_start_message": "Estou buscando informações na internet. Voltarei com resultados em 5 minutos.",
     "trying_fast_reply": "Testando o modo de resposta rápida..."
   },
   "fr": {
@@ -135,8 +135,8 @@
     "sources_label": "Sources",
     "error_fast_reply_empty": "Impossible de fournir une réponse rapide. Choisissez un autre mode ou reformulez.",
     "error_fast_reply_chinese": "Le mode Rapide n’a pas fonctionné. Veuillez choisir un autre mode.",
-    "deep_research_start_message": "Deep Research peut prendre 10–15 minutes. Je vous préviendrai lorsque ce sera prêt.",
-    "deep_search_start_message": "Je cherche des informations en ligne. Je reviens avec des résultats dans 2-3 minutes.",
+    "deep_research_start_message": "Deep Research peut prendre 30 minutes. Je vous préviendrai lorsque ce sera prêt.",
+    "deep_search_start_message": "Je cherche des informations en ligne. Je reviens avec des résultats dans 5 minutes.",
     "trying_fast_reply": "Essai du mode de réponse rapide..."
   },
   "de": {
@@ -163,8 +163,8 @@
     "sources_label": "Quellen",
     "error_fast_reply_empty": "Keine schnelle Antwort möglich. Wähle einen anderen Modus oder formuliere neu.",
     "error_fast_reply_chinese": "Der Schnellmodus hat nicht funktioniert. Bitte wähle einen anderen Modus.",
-    "deep_research_start_message": "Deep Research kann 10–15 Minuten dauern. Ich sage Bescheid, wenn es fertig ist.",
-    "deep_search_start_message": "Ich suche online nach Informationen. Ergebnisse in 2-3 Minuten.",
+    "deep_research_start_message": "Deep Research kann 30 Minuten dauern. Ich sage Bescheid, wenn es fertig ist.",
+    "deep_search_start_message": "Ich suche online nach Informationen. Ergebnisse in 5 Minuten.",
     "trying_fast_reply": "Schnellantwortmodus wird ausprobiert..."
   },
   "tr": {
@@ -191,8 +191,8 @@
     "sources_label": "Kaynaklar",
     "error_fast_reply_empty": "Hızlı yanıt veremedim. Başka bir mod seçin veya yeniden ifade edin.",
     "error_fast_reply_chinese": "Hızlı Mod çalışmadı. Lütfen başka bir mod seçmeyi deneyin.",
-    "deep_research_start_message": "Deep Research 10–15 dakika sürebilir. Hazır olduğunda haber vereceğim.",
-    "deep_search_start_message": "İnternette bilgi arıyorum. Sonuçlarla 2-3 dakika içinde döneceğim.",
+    "deep_research_start_message": "Deep Research 30 dakika sürebilir. Hazır olduğunda haber vereceğim.",
+    "deep_search_start_message": "İnternette bilgi arıyorum. Sonuçlarla 5 dakika içinde döneceğim.",
     "trying_fast_reply": "Hızlı yanıt modu deneniyor..."
   },
   "id": {
@@ -219,8 +219,8 @@
     "sources_label": "Sumber",
     "error_fast_reply_empty": "Saya tidak bisa memberi jawaban cepat. Pilih mode lain atau ubah pertanyaannya.",
     "error_fast_reply_chinese": "Mode Cepat tidak berfungsi. Silakan coba pilih mode lain.",
-    "deep_research_start_message": "Deep Research mungkin memerlukan 10–15 menit. Saya akan memberi tahu saat selesai.",
-    "deep_search_start_message": "Saya sedang mencari informasi di internet. Akan kembali dengan hasil dalam 2-3 menit.",
+    "deep_research_start_message": "Deep Research mungkin memerlukan 30 menit. Saya akan memberi tahu saat selesai.",
+    "deep_search_start_message": "Saya sedang mencari informasi di internet. Akan kembali dengan hasil dalam 5 menit.",
     "trying_fast_reply": "Mencoba mode balasan cepat..."
   }
 }
