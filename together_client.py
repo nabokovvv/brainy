@@ -469,7 +469,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
     final_answer = response_text
 
     if top_sources:
-        final_answer += f"\n\n{translator.get_string("sources_label", lang)}:\n"
+        final_answer += f"\n\n{translator.get_string('sources_label', lang)}:\n"
         for i, url in enumerate(top_sources):
             final_answer += f"{i+1}. {unquote(url)}\n"
 

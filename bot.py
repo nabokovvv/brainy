@@ -185,7 +185,7 @@ def escape_markdown_v2(text: str) -> str:
         seg = re.sub(r'\n{3,}', '\n\n', seg)
 
         # снять экранирование внутри URL
-        seg = _URL_IN_PARENS.sub(lambda m: f"({m.group(1).replace('\\', '')})", seg)
+        seg = _URL_IN_PARENS.sub(lambda m: f"({m.group(1).replace(r'', '')})", seg)
 
         # если маркеры цитаты/нумерации встретились не в начале строки — перенос
         seg = re.sub(r'(?<!^)(?<![\n\r])((?:\d+\\\.|>))(?=\s)', r'\n\1', seg)
@@ -372,7 +372,7 @@ async def write_pelican_md_file(query: str, llm_response: str, lang: str, mode: 
     sources_text = ""
     main_content = llm_response
     try:
-        sources_label = translator.get_string("sources_label", lang)
+        sources_label = translator.get_string('sources_label', lang)
         sources_separator = f"\n\n## {sources_label}:\n"
         if sources_separator in main_content:
             # Split content and sources
