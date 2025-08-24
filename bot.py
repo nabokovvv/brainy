@@ -470,7 +470,7 @@ async def fast_web_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, q
         searcher = search_client.SearchClient(
             config.SEARCH_BACKEND, config.YANDEX_API_KEY
         )
-        xml_results = await searcher.search(query, num_results=30)
+        xml_results = await searcher.search(query, num_results=12)
         yandex_raw = await asyncio.to_thread(xml_parser.parse_yandex_xml, xml_results)
 
         if not yandex_raw:

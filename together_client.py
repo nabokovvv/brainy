@@ -77,7 +77,7 @@ async def get_sub_queries(query: str, lang: str) -> list[str]:
     detected_user_lang = detect_language(query)
     prompt_lang = 'en' if detected_user_lang == 'en' else lang
 
-    prompt = f"""Based on the following query, generate up to 8 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. The majority of them should be in "{prompt_lang}" language, and a couple - in English. Return the sub-queries as a clean JSON list of strings without comments.
+    prompt = f"""Based on the following query, generate up to 4 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. Three of them should be in "{prompt_lang}" language, and one - in English. Return the sub-queries as a clean JSON list of strings without comments.
 
 Query from user: {query}"""
     
@@ -130,7 +130,7 @@ async def get_research_steps(query: str, lang: str, entities_info: list) -> list
 
 Your response must be in the "{prompt_lang}" language.
 
-Return the steps as a clean JSON list of strings, with a maximum of 10 items in {prompt_lang} language. For example:
+Return the steps as a clean JSON list of strings, with a maximum of 6 items in {prompt_lang} language. For example:
 [
   "Check A",
   "Review B",
@@ -450,7 +450,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 10-200 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\nContext snippets: {snippet_text}"""
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 150-250 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\nContext snippets: {snippet_text}"""
     
     logger.info(f"Together AI (generate_answer_from_serp) - Prompt: {prompt}")
     try:
@@ -510,7 +510,7 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n{entity_context}\n\nRules: 1. Max output should be around 400-600 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Do not add any information not present in the snippets. 5. Stick closer to the language and style of provided context snippets. 6. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 7. **Crucially, cite your sources in square brackets (strictly follow this format: "[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)") directly within the text where the information is used.**\nContext snippets: {snippet_text}"""
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n{entity_context}\n\nRules: 1. Max output should be around 400-600 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Do not add any information not present in the snippets. 5. Stick closer to the language and style of provided context snippets. 6. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 7. **Crucially, cite your sources in square brackets (strictly follow this format: "[[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)]") directly within the text where the information is used.**\nContext snippets: {snippet_text}"""
     
     logger.info(f"Together AI (generate_summary_from_chunks) - Prompt: {prompt}")
     try:
