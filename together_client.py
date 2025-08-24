@@ -671,10 +671,10 @@ async def deepseek_r1_reply(query: str, lang: str) -> str:
 async def polish_research_answer(summaries: str, query: str, lang: str, translator) -> str:
     """Takes a list of summaries and synthesizes the final answer, truncating if necessary."""
     # --- 1. Define constants and strip think tags ---
-    summaries = strip_think(summaries) # CRITICAL: Strip think tags first
+    summaries = strip_think(summaries)  # CRITICAL: Strip think tags first
     MODEL_CONTEXT_WINDOW = 8192
     MAX_OUTPUT_TOKENS = 4000
-    CHAR_PER_TOKEN_ESTIMATE = 3 # Conservative estimate
+    CHAR_PER_TOKEN_ESTIMATE = 3  # Conservative estimate
 
     # --- 2. Calculate available space for summaries ---
     prompt_template = f"""You are a chief researcher. Answer the user's query based on the research data provided to you. 
@@ -732,12 +732,14 @@ Logos, ratings, and quick testimonials answer “Is this legit?” fast—so mor
     logger.info(f"Together AI (polish-research) - Final prompt to be sent: {final_prompt}")
     logger.info(f"Together AI (polish-research) - Prompting to synthesize final answer. Final summaries length: {len(summaries)} chars.")
     try:
-        response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK,
+        data = await chat_with_fallback(
+            model=config.TOGETHER_DEEPSEEK,
             messages=[{"role": "user", "content": final_prompt}],
             temperature=0.5,
             max_tokens=MAX_OUTPUT_TOKENS
         )
-        polished_text = response.choices[0].message.content.strip()
+        # ВАЖНО: теперь ответ — dict; берём content и срезаем <think>
+        polished_text = strip_think(data["choices"][0]["message"]["content"]).strip()
     except Exception as e:
         logger.error(f"Together AI (polish-research) - Request failed: {e}")
         return "Error: Could not generate the final research answer."
