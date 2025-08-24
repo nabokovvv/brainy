@@ -24,7 +24,8 @@
     "error_fast_reply_empty": "I couldn't provide a fast answer. Select another mode or rephrase.",
     "error_fast_reply_chinese": "Fast Mode didn’t work. Please try a different mode.",
     "deep_research_start_message": "Deep Research may take 10-15 minutes. I’ll notify you when it’s done.",
-    "deep_search_start_message": "I’m searching online now and will be back in 2-3 minutes with what I find."
+    "deep_search_start_message": "I’m searching online now and will be back in 2-3 minutes with what I find.",
+    "trying_fast_reply": "Trying fast reply mode..."
   },
   "es": {
     "welcome_new_user": "👋 ¡Hola! Soy Brainy, tu asistente de IA. El idioma está configurado en español. ¿Quieres cambiarlo?",
@@ -51,7 +52,8 @@
     "error_fast_reply_empty": "No pude dar una respuesta rápida. Elige otro modo o reformula.",
     "error_fast_reply_chinese": "El Modo Rápido no funcionó. Por favor, intenta elegir otro modo.",
     "deep_research_start_message": "Deep Research puede tardar 10–15 minutos. Te avisaré cuando esté listo.",
-    "deep_search_start_message": "Estoy buscando información en internet. Volveré con resultados en 2-3 minutos."
+    "deep_search_start_message": "Estoy buscando información en internet. Volveré con resultados en 2-3 minutos.",
+    "trying_fast_reply": "Probando el modo de respuesta rápida..."
   },
   "ru": {
     "welcome_new_user": "👋 Привет! Я Brainy, ваш ИИ‑помощник. Сейчас выбран русский язык. Хотите сменить язык?",
@@ -78,7 +80,8 @@
     "error_fast_reply_empty": "Не удалось быстро ответить. Выберите другой режим или переформулируйте вопрос.",
     "error_fast_reply_chinese": "Быстрый режим не сработал. Пожалуйста, попробуйте выбрать другой режим.",
     "deep_research_start_message": "Глубокое исследование займёт 10–15 минут. Сообщу, когда будет готово.",
-    "deep_search_start_message": "Ищу информацию в интернете. Вернусь с результатами через 2-3 минуты."
+    "deep_search_start_message": "Ищу информацию в интернете. Вернусь с результатами через 2-3 минуты.",
+    "trying_fast_reply": "Пробую режим быстрого ответа..."
   },
   "pt": {
     "welcome_new_user": "👋 Olá! Sou o Brainy, seu assistente de IA. O idioma está definido como português. Quer mudar?",
@@ -105,7 +108,8 @@
     "error_fast_reply_empty": "Não consegui responder rapidamente. Escolha outro modo ou reformule.",
     "error_fast_reply_chinese": "O Modo Rápido não funcionou. Por favor, tente escolher outro modo.",
     "deep_research_start_message": "Deep Research pode levar de 10 a 15 minutos. Avisarei quando estiver pronto.",
-    "deep_search_start_message": "Estou buscando informações na internet. Voltarei com resultados em 2-3 minutos."
+    "deep_search_start_message": "Estou buscando informações na internet. Voltarei com resultados em 2-3 minutos.",
+    "trying_fast_reply": "Testando o modo de resposta rápida..."
   },
   "fr": {
     "welcome_new_user": "👋 Salut ! Je suis Brainy, votre assistant IA. La langue est réglée sur le français. Voulez‑vous la changer ?",
@@ -132,7 +136,8 @@
     "error_fast_reply_empty": "Impossible de fournir une réponse rapide. Choisissez un autre mode ou reformulez.",
     "error_fast_reply_chinese": "Le mode Rapide n’a pas fonctionné. Veuillez choisir un autre mode.",
     "deep_research_start_message": "Deep Research peut prendre 10–15 minutes. Je vous préviendrai lorsque ce sera prêt.",
-    "deep_search_start_message": "Je cherche des informations en ligne. Je reviens avec des résultats dans 2-3 minutes."
+    "deep_search_start_message": "Je cherche des informations en ligne. Je reviens avec des résultats dans 2-3 minutes.",
+    "trying_fast_reply": "Essai du mode de réponse rapide..."
   },
   "de": {
     "welcome_new_user": "👋 Hallo! Ich bin Brainy, dein KI‑Assistent. Die Sprache ist auf Deutsch eingestellt. Möchtest du sie ändern?",
@@ -159,7 +164,8 @@
     "error_fast_reply_empty": "Keine schnelle Antwort möglich. Wähle einen anderen Modus oder formuliere neu.",
     "error_fast_reply_chinese": "Der Schnellmodus hat nicht funktioniert. Bitte wähle einen anderen Modus.",
     "deep_research_start_message": "Deep Research kann 10–15 Minuten dauern. Ich sage Bescheid, wenn es fertig ist.",
-    "deep_search_start_message": "Ich suche online nach Informationen. Ergebnisse in 2-3 Minuten."
+    "deep_search_start_message": "Ich suche online nach Informationen. Ergebnisse in 2-3 Minuten.",
+    "trying_fast_reply": "Schnellantwortmodus wird ausprobiert..."
   },
   "tr": {
     "welcome_new_user": "👋 Merhaba! Ben Brainy, yapay zekâ asistanın. Dil Türkçe olarak ayarlı. Değiştirmek ister misiniz?",
@@ -186,7 +192,8 @@
     "error_fast_reply_empty": "Hızlı yanıt veremedim. Başka bir mod seçin veya yeniden ifade edin.",
     "error_fast_reply_chinese": "Hızlı Mod çalışmadı. Lütfen başka bir mod seçmeyi deneyin.",
     "deep_research_start_message": "Deep Research 10–15 dakika sürebilir. Hazır olduğunda haber vereceğim.",
-    "deep_search_start_message": "İnternette bilgi arıyorum. Sonuçlarla 2-3 dakika içinde döneceğim."
+    "deep_search_start_message": "İnternette bilgi arıyorum. Sonuçlarla 2-3 dakika içinde döneceğim.",
+    "trying_fast_reply": "Hızlı yanıt modu deneniyor..."
   },
   "id": {
     "welcome_new_user": "👋 Halo! Saya Brainy, asisten AI Anda. Bahasa disetel ke bahasa Indonesia. Ingin menggantinya?",
@@ -213,6 +220,7 @@
     "error_fast_reply_empty": "Saya tidak bisa memberi jawaban cepat. Pilih mode lain atau ubah pertanyaannya.",
     "error_fast_reply_chinese": "Mode Cepat tidak berfungsi. Silakan coba pilih mode lain.",
     "deep_research_start_message": "Deep Research mungkin memerlukan 10–15 menit. Saya akan memberi tahu saat selesai.",
-    "deep_search_start_message": "Saya sedang mencari informasi di internet. Akan kembali dengan hasil dalam 2-3 menit."
+    "deep_search_start_message": "Saya sedang mencari informasi di internet. Akan kembali dengan hasil dalam 2-3 menit.",
+    "trying_fast_reply": "Mencoba mode balasan cepat..."
   }
 }
