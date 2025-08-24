@@ -487,7 +487,7 @@ async def deepseek_r1_reply(query: str, lang: str) -> str:
     try:
         system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language."
         response = client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL,
+            model=config.TOGETHER_DEEPSEEK,
             messages=[
                 {
                     "role": "system",

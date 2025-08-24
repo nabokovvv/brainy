@@ -536,7 +536,7 @@ async def deepseek_r1_reply(query: str, lang: str) -> str:
     try:
         system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language."
         response = await client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL,
+            model=config.TOGETHER_DEEPSEEK,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": query}
@@ -641,7 +641,7 @@ Provide only the summary of the text below, with no extra comments or introducti
     logger.info(f"Together AI (summarize-chunk) - Prompting to summarize chunk of length {len(chunk)}.")
     try:
         response = await client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL, # Use the specified summarizer model
+            model=config.TOGETHER_DEEPSEEK, # Use the specified summarizer model
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2, # Factual summarization
             max_tokens=4000 # Allow for a decent summary length, but not too long

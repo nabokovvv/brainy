@@ -373,12 +373,12 @@ async def write_pelican_md_file(query: str, llm_response: str, lang: str, mode: 
     main_content = llm_response
     try:
         sources_label = translator.get_string("sources_label", lang)
-        sources_separator = f"\n\n{sources_label}:\n"
+        sources_separator = f"\n\n## {sources_label}:\n"
         if sources_separator in main_content:
             # Split content and sources
             content_parts = main_content.split(sources_separator, 1)
             main_content = content_parts[0]
-            sources_text = f"\n\n{sources_label}:\n{content_parts[1]}"
+            sources_text = f"\n\n## {sources_label}:\n{content_parts[1]}"
     except Exception:
         # If sources label not found or any other error, treat the whole response as main content
         pass
@@ -424,16 +424,16 @@ async def write_pelican_md_file(query: str, llm_response: str, lang: str, mode: 
 
     # Append statistics if provided
     if stats_data:
-        stats_block = f"""**{translate_string('Research Statistics:', lang)}**
+        stats_block = f"""## {translate_string('Research Statistics:', lang)}\n
 """
         if "websites_visited" in stats_data:
             stats_block += f"- {translate_string('Websites Visited:', lang)} {stats_data['websites_visited']}\n"
         if "chunks_analyzed" in stats_data:
-            stats_block += f"- {translate_string('Chunks Analyzed:', lang)} {stats_data['chunks_analyzed']}\n"
+            stats_block += f"- {translate_string('Chunks Analyzed:', lang)} {stats_data['chunks_analyzed']:,}\n"
         if "total_chars_read" in stats_data:
-            stats_block += f"- {translate_string('Total Characters Read:', lang)} {stats_data['total_chars_read']}\n"
+            stats_block += f"- {translate_string('Total Characters Read:', lang)} {stats_data['total_chars_read']:,}\n"
         # Format the stats block as a markdown comment that is not rendered in HTML
-        body += f"\n\n<!--\n{stats_block.strip()}\n-->"
+        body += f"\n\n{stats_block.strip()}"
 
     # 3. Tags: only 1 tag - used mode (translated and cleaned)
     translated_mode = translator.get_string(f"mode_{mode}", lang)

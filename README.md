@@ -54,7 +54,7 @@ LLM_CLIENT = "together"
 
 # Other configurations (e.g., model names, thresholds)
 TOGETHER_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-DEEPSEEK_MODEL = "deepseek-ai/deepseek-coder-6.7b-instruct"
+TOGETHER_DEEPSEEK = "deepseek-ai/deepseek-coder-6.7b-instruct"
 TOGETHER_WEB_SEARCH = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 TOGETHER_DEEPSEEK = "deepseek-ai/deepseek-coder-6.7b-instruct"
 DEEP_SEARCH_STEP_SIX_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
