@@ -530,7 +530,8 @@ If you cannot provide a short and precise answer, you MUST explicitly state that
         "top_k": 50,
         "top_p": 0.9,
         "repetition_penalty": 1.1,
-        "max_tokens": 400
+        "max_tokens": 400,
+        "reasoning_effort": "low",
     }
     logger.info(f"Together AI (fast-reply) - System Prompt: {system_prompt}")
     logger.info(f"Together AI (fast-reply) - User Prompt: {user_prompt}")
