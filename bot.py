@@ -217,9 +217,6 @@ def get_full_mode_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> Inl
             [
                 InlineKeyboardButton(translator.get_string("mode_fast_reply", lang), callback_data="fast_reply"),
                 InlineKeyboardButton(translator.get_string("mode_deep_search", lang), callback_data="deep_search"),
-            ],
-            [
-                InlineKeyboardButton(translator.get_string("mode_deepseek_r1", lang), callback_data="deepseek_r1"),
             ]
         ]
     )
