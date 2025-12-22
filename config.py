@@ -27,12 +27,12 @@ TOGETHER_AI_API_KEY = os.getenv("TOGETHER_AI_API_KEY")
 if not TOGETHER_AI_API_KEY:
     raise ValueError("TOGETHER_AI_API_KEY environment variable not set.")
 
-TOGETHER_MODEL = os.getenv("TOGETHER_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free")
-TOGETHER_DEEPSEEK = os.getenv("TOGETHER_DEEPSEEK", "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free")
-TOGETHER_WEB_SEARCH = os.getenv("TOGETHER_WEB_SEARCH", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free")
-TOGETHER_FAST = os.getenv("TOGETHER_FAST", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free")
-TOGETHER_SUMMARY = os.getenv("TOGETHER_SUMMARY", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free")
-TOGETHER_QUERIES = os.getenv("TOGETHER_QUERIES", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free")
+TOGETHER_MODEL = os.getenv("TOGETHER_MODEL", "ServiceNow-AI/Apriel-1.6-15b-Thinker")
+TOGETHER_DEEPSEEK = os.getenv("TOGETHER_DEEPSEEK", "ServiceNow-AI/Apriel-1.5-15b-Thinker")
+TOGETHER_WEB_SEARCH = os.getenv("TOGETHER_WEB_SEARCH", TOGETHER_MODEL)
+TOGETHER_FAST = os.getenv("TOGETHER_FAST", TOGETHER_MODEL)
+TOGETHER_SUMMARY = os.getenv("TOGETHER_SUMMARY", TOGETHER_MODEL)
+TOGETHER_QUERIES = os.getenv("TOGETHER_QUERIES", TOGETHER_MODEL)
 
 
 # Search

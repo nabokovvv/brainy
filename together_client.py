@@ -18,12 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 # === Header-aware rate limiter & free-model fallback ===
-LLAMA_FREE = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free"
-DEEPSEEK_FREE = "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free"
+LLAMA_FREE = config.TOGETHER_MODEL
+DEEPSEEK_FREE = config.TOGETHER_DEEPSEEK
 API_URL = "https://api.together.xyz/v1/chat/completions"
 
 def _other_free(model_str: str) -> str:
     m = (model_str or "").lower()
+    if "apriel-1.6" in m:
+        return DEEPSEEK_FREE
+    if "apriel-1.5" in m:
+        return LLAMA_FREE
     if "deepseek" in m:
         return LLAMA_FREE
     if "llama" in m or "meta-llama" in m:
