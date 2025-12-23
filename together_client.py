@@ -16,6 +16,11 @@ from together import AsyncTogether, error
 
 logger = logging.getLogger(__name__)
 
+THINKING_GUIDANCE = (
+    "Think through the task step-by-step inside <think>...</think> tags. "
+    "Keep all reasoning inside the <think> block and provide the final answer only after the closing </think> tag."
+)
+
 
 # === Header-aware rate limiter & free-model fallback ===
 LLAMA_FREE = config.TOGETHER_MODEL
@@ -224,6 +229,8 @@ async def get_sub_queries(query: str, lang: str) -> list[str]:
 
     prompt = f"""Based on the following query, generate up to 4 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. Three of them should be in "{prompt_lang}" language, and one - in English. Return the sub-queries as a clean JSON list of strings without comments.
 
+{THINKING_GUIDANCE}
+
 Query from user: {query}"""
     
     logger.info(f"Together AI (sub-queries) - Prompt: {prompt}")
@@ -280,6 +287,8 @@ Return the steps as a clean JSON list of strings, with a maximum of 6 items in {
   "Review B",
   "Compare A and B"
 ]
+
+{THINKING_GUIDANCE}
 
 Query from user: {query}
 """
@@ -344,6 +353,8 @@ Example JSON output:
 
 **Research Data (Summaries of each research item):**
 {formatted_research_data}
+
+{THINKING_GUIDANCE}
 """
     logger.info(f"Together AI (research-synthesis) - Prompt: {prompt}")
     try:
@@ -382,7 +393,7 @@ async def synthesize_answer(query: str, research_data: list, lang: str, entities
             entity_context += f"  QID: {entity['qid']}\n"
 
     # Base prompt template without the dynamic context
-    base_prompt_template = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed, structured, and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n\n**Instructions:**\n1. **Your response MUST be in the \"{prompt_lang}\" language, regardless of the language of the snippets.**\n2. Synthesize the information from all sub-queries to create a single, coherent answer to the main question.\n3. Information discovered in \"Discovered entities and their details\" is the most reliable, and it is your final source of truth.\n\n**Main Question:** {query}\n{entity_context}\n\n**Context from search results:**\n"""
+    base_prompt_template = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed, structured, and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n\n**Instructions:**\n1. **Your response MUST be in the \"{prompt_lang}\" language, regardless of the language of the snippets.**\n2. Synthesize the information from all sub-queries to create a single, coherent answer to the main question.\n3. Information discovered in \"Discovered entities and their details\" is the most reliable, and it is your final source of truth.\n4. {THINKING_GUIDANCE}\n\n**Main Question:** {query}\n{entity_context}\n\n**Context from search results:**\n"""
 
     # --- 2. Calculate available space for dynamic context ---
     base_prompt_char_len = len(base_prompt_template) + len(query) # Also account for user query in messages
@@ -449,7 +460,7 @@ async def translate_if_needed(query: str, original_answer: str) -> str:
     detected_language = detect_language(query)
     logger.info(f"Detected query language: {detected_language}")
 
-    translation_prompt = f'''Answer the user\'s question in the {detected_language} language. User\'s question: "{query}".'''
+    translation_prompt = f'''Answer the user\'s question in the {detected_language} language. {THINKING_GUIDANCE} User\'s question: "{query}".'''
     try:
         response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": translation_prompt}],
@@ -473,6 +484,7 @@ async def prompt_without_context(query: str, lang: str, model: str = None, param
     prompt_lang = 'en' if detected_user_lang == 'en' else lang
 
     prompt = f"""You are a helpful AI assistant. Always answer in the "{prompt_lang}" language!
+{THINKING_GUIDANCE}
     
 Question from the user: {query}
 """
@@ -510,6 +522,8 @@ async def fast_reply(query: str, lang: str, available_modes: list, translated_mo
 
     system_prompt = f"""Your name is Brainy. You are a Telegram bot, but you also have a website: https://askbrainy.com. You are a helpful AI assistant built with free, open-source tools. Your creator's Telegram nickname is @bonbekon. You will always be accessible for free. The core idea behind you is to combine a fast, open-source Large Language Models with real-time context from the internet (a technique called RAG) to provide answers comparable in quality to proprietary models like ChatGPT. Your advantages vs other free AI tools: fast responses to easy everyday questions, actual and unbiased information, free unlimited deep research.
 
+{THINKING_GUIDANCE}
+
 Your goal is to give THE SHORTEST and MOST PRECISE answer possible. No more than 50 words in total. If a more detailed answer is absolutely required, suggest using other modes. Always answer in the "{prompt_lang}" language.
 
 If you cannot provide a short and precise answer, you MUST explicitly state that you cannot and advise the user to use a more suitable mode:
@@ -530,7 +544,7 @@ If you cannot provide a short and precise answer, you MUST explicitly state that
         "top_k": 50,
         "top_p": 0.9,
         "repetition_penalty": 1.1,
-        "max_tokens": 400,
+        "max_tokens": 1200,
         "reasoning_effort": "low",
     }
     logger.info(f"Together AI (fast-reply) - System Prompt: {system_prompt}")
@@ -590,14 +604,14 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 150-250 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\nContext snippets: {snippet_text}"""
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 150-250 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\n{THINKING_GUIDANCE}\nContext snippets: {snippet_text}"""
     
     logger.info(f"Together AI (generate_answer_from_serp) - Prompt: {prompt}")
     try:
         response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            max_tokens=1200
+            max_tokens=2400
         )
         response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
@@ -649,7 +663,7 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n{entity_context}\n\nRules: 1. Max output should be around 400-600 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Do not add any information not present in the snippets. 5. Stick closer to the language and style of provided context snippets. 6. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 7. **Crucially, cite your sources in square brackets (strictly follow this format: "[[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)]") directly within the text where the information is used.**\nContext snippets: {snippet_text}"""
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n{entity_context}\n\nRules: 1. Max output should be around 400-600 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Do not add any information not present in the snippets. 5. Stick closer to the language and style of provided context snippets. 6. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 7. **Crucially, cite your sources in square brackets (strictly follow this format: "[[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)]") directly within the text where the information is used.** 8. {THINKING_GUIDANCE}\nContext snippets: {snippet_text}"""
     
     logger.info(f"Together AI (generate_summary_from_chunks) - Prompt: {prompt}")
     try:
@@ -672,7 +686,7 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
 @retry_on_server_error()
 async def deepseek_r1_reply(query: str, lang: str) -> str:
     try:
-        system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language."
+        system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language. {THINKING_GUIDANCE}"
         response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -734,7 +748,8 @@ Here’s why:
 
 Logos, ratings, and quick testimonials answer “Is this legit?” fast—so more visitors keep reading and more of them click the CTA."
 
-7. Your final answer must be in the "{lang}" language."""
+7. Your final answer must be in the "{lang}" language.
+8. {THINKING_GUIDANCE}"""
     
     base_prompt_len = len(prompt_template.format(summaries=''))
     max_summaries_len = (MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS) * CHAR_PER_TOKEN_ESTIMATE - base_prompt_len
@@ -770,7 +785,7 @@ async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
     """Summarizes a single chunk of research data in the context of the user's query."""
     prompt = f"""You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and wel-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
 
-Provide only the summary of the text below, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets: their domains or full urls if available.
+Provide only the summary of the text below, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets: their domains or full urls if available. {THINKING_GUIDANCE}
 
 **Research Draft Chunk:**
 
