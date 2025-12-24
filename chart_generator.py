@@ -9,6 +9,12 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# Define thinking guidance constant
+THINKING_GUIDANCE = (
+    "Think through the task step-by-step inside <tool_call>...</tool_call> tags. "
+    "Keep all reasoning inside the <tool_call> block and provide the final answer only after the closing </tool_call> tag."
+)
+
 async def get_chart_data_from_text(article_text: str, llm_client, model: str) -> str:
     """
     Asks the LLM to extract chart data from a given text using the provided client.
@@ -51,6 +57,8 @@ Constraints:
   "error": "insufficient_data",
   "reason": "string"   // brief reason why the chart cannot be built
 }}
+
+{THINKING_GUIDANCE}
 
 ARTICLE TEXT:
 {article_text}

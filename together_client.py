@@ -783,7 +783,7 @@ Logos, ratings, and quick testimonials answer “Is this legit?” fast—so mor
 @retry_on_server_error()
 async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
     """Summarizes a single chunk of research data in the context of the user's query."""
-    prompt = f"""You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and wel-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
+    prompt = f"""You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and well-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
 
 Provide only the summary of the text below, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets: their domains or full urls if available. {THINKING_GUIDANCE}
 
