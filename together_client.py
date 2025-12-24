@@ -371,7 +371,7 @@ Example JSON output:
     return response_text
 
 @retry_on_server_error()
-async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list, reasoning_effort = "medium") -> str:
+async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
     # Define model and token limits
     MODEL_CONTEXT_WINDOW = 10000
     MAX_OUTPUT_TOKENS = 2400  # Reduced to leave more buffer
@@ -439,7 +439,8 @@ async def synthesize_answer(query: str, research_data: list, lang: str, entities
                 {"role": "user", "content": query}
             ],
             temperature=0.3,
-            max_tokens=MAX_OUTPUT_TOKENS
+            max_tokens=MAX_OUTPUT_TOKENS,
+            reasoning_effort = "medium"
         )
         response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
