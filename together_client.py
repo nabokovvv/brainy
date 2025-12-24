@@ -17,7 +17,7 @@ from together import AsyncTogether, error
 logger = logging.getLogger(__name__)
 
 THINKING_GUIDANCE = (
-    "Think through the task step-by-step inside <think>...</think> tags. "
+    "IMPORTANT: Think through the task step-by-step inside <think>...</think> tags. "
     "Keep all reasoning inside the <think> block and provide the final answer only after the closing </think> tag."
 )
 
@@ -371,7 +371,7 @@ Example JSON output:
     return response_text
 
 @retry_on_server_error()
-async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
+async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list, reasoning_effort = "medium") -> str:
     # Define model and token limits
     MODEL_CONTEXT_WINDOW = 10000
     MAX_OUTPUT_TOKENS = 2400  # Reduced to leave more buffer
