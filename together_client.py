@@ -373,8 +373,8 @@ Example JSON output:
 @retry_on_server_error()
 async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
     # Define model and token limits
-    MODEL_CONTEXT_WINDOW = 8192
-    MAX_OUTPUT_TOKENS = 1200  # Reduced to leave more buffer
+    MODEL_CONTEXT_WINDOW = 10000
+    MAX_OUTPUT_TOKENS = 2400  # Reduced to leave more buffer
     CHAR_PER_TOKEN_ESTIMATE = 3  # More conservative estimate
 
     # --- 1. Construct the static parts of the prompt ---
@@ -704,8 +704,8 @@ async def polish_research_answer(summaries: str, query: str, lang: str, translat
     """Takes a list of summaries and synthesizes the final answer, truncating if necessary."""
     # --- 1. Define constants and strip think tags ---
     summaries = strip_think(summaries)  # CRITICAL: Strip think tags first
-    MODEL_CONTEXT_WINDOW = 8192
-    MAX_OUTPUT_TOKENS = 4000
+    MODEL_CONTEXT_WINDOW = 10000
+    MAX_OUTPUT_TOKENS = 5000
     CHAR_PER_TOKEN_ESTIMATE = 3  # Conservative estimate
 
     # --- 2. Calculate available space for summaries ---
