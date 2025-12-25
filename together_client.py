@@ -572,13 +572,14 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
     unique_snippets_for_ranking = _filter_duplicate_chunks(snippets)
     sorted_snippets = sorted(unique_snippets_for_ranking, key=lambda s: len(s.text), reverse=True)
 
-    top_sources = []
+    # Fallback sources extracted from snippets
+    fallback_sources = []
     seen_urls = set()
     for s in sorted_snippets:
         if s.source_url not in seen_urls:
-            top_sources.append(s.source_url)
+            fallback_sources.append(s.source_url)
             seen_urls.add(s.source_url)
-        if len(top_sources) >= 3:
+        if len(fallback_sources) >= 3:
             break
 
     snippets_by_domain = {}
@@ -608,7 +609,8 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 150-250 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\n{THINKING_GUIDANCE}\nContext snippets: {snippet_text}"""
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a short and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Max output should be around 150-250 words. 2. Double check you don't repeat yourself and provide only unique and detailed information. 3. Answer in the "{prompt_lang}" language. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. If the user query implies a short answer (facts, dates, quick advice etc), keep you answer very short. 7. If the user query implies a long answer (e.g. comparisons, lists, coding, analysis, research etc) provide a detailed answer.\n\nContext snippets: {snippet_text}\n\nIMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:\n{{\n  "thinking": "Your internal analysis of the query and context here",\n  "final": "Your complete answer to the user in {prompt_lang} language",\n  "sources": ["https://full-url-1.com", "https://full-url-2.com", "https://full-url-3.com"]\n}}\n\nInclude up to 5 most relevant source URLs (complete URLs, not domains) from the context snippets."""
     
     logger.info(f"Together AI (generate_answer_from_serp) - Prompt: {prompt}")
     try:
@@ -617,14 +619,91 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
             temperature=0.2,
             max_tokens=4000
         )
-        response_text = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (generate_answer_from_serp) - Request failed: {e}")
         raise
     
-    logger.info(f"Together AI (generate_answer_from_serp) - Response: {response_text}")
-    final_answer = response_text
-
+    logger.info(f"Together AI (generate_answer_from_serp) - Raw Response: {response_text}")
+    
+    # Attempt to parse JSON response
+    parsed_json = None
+    final_answer_text = ""
+    sources_from_json = []
+    
+    try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (generate_answer_from_serp) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (generate_answer_from_serp) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"final"[\s\S]*?"sources"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (generate_answer_from_serp) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (generate_answer_from_serp) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (generate_answer_from_serp) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (generate_answer_from_serp) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        final_answer_text = parsed_json.get('final', '')
+        sources_from_json = parsed_json.get('sources', [])
+        
+        # Log extracted field info
+        logger.info(f"Together AI (generate_answer_from_serp) - Extracted fields: thinking_length={len(thinking)}, final_length={len(final_answer_text)}, sources_count={len(sources_from_json) if isinstance(sources_from_json, list) else 0}")
+        
+        # Validate required fields
+        if not final_answer_text:
+            logger.warning(f"Together AI (generate_answer_from_serp) - Missing or empty 'final' field, using thinking as fallback")
+            final_answer_text = thinking if thinking else response_text
+        
+        if not thinking:
+            logger.warning(f"Together AI (generate_answer_from_serp) - Missing 'thinking' field")
+        
+        # Validate sources field
+        if not isinstance(sources_from_json, list):
+            logger.warning(f"Together AI (generate_answer_from_serp) - 'sources' field is not an array, converting to empty array")
+            sources_from_json = []
+        
+        # Validate and filter sources - must be valid URLs
+        validated_sources = []
+        for src in sources_from_json:
+            if isinstance(src, str) and (src.startswith('http://') or src.startswith('https://')):
+                if src not in validated_sources:  # Deduplicate
+                    validated_sources.append(src)
+        
+        sources_from_json = validated_sources
+        logger.info(f"Together AI (generate_answer_from_serp) - Validated {len(sources_from_json)} sources from JSON")
+        
+    else:
+        # Fallback to legacy strip_think method
+        logger.error(f"Together AI (generate_answer_from_serp) - Falling back to legacy strip_think method")
+        final_answer_text = strip_think(response_text)
+    
+    # Determine final sources to display (max 3)
+    top_sources = []
+    if sources_from_json:
+        # Use sources from JSON, limit to 3
+        top_sources = sources_from_json[:3]
+        logger.info(f"Together AI (generate_answer_from_serp) - Using {len(top_sources)} sources from JSON")
+    else:
+        # Fallback to snippet-based sources
+        top_sources = fallback_sources
+        logger.info(f"Together AI (generate_answer_from_serp) - Using {len(top_sources)} fallback sources from snippets")
+    
+    # Construct final answer with sources
+    final_answer = final_answer_text
+    
     if top_sources:
         final_answer += f"\n\n{translator.get_string('sources_label', lang)}:\n"
         for i, url in enumerate(top_sources):
