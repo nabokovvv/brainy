@@ -56,3 +56,13 @@ CHARTS_OUTPUT_DIR = os.getenv("CHARTS_OUTPUT_DIR", "charts")
 
 # Custom User-Agent
 CUSTOM_USER_AGENT = os.getenv("CUSTOM_USER_AGENT", "BrainyBot/1.0 (https://askbrainy.com)")
+
+# Entity Disambiguation Configuration
+MIN_SITELINKS_THRESHOLD = int(os.getenv("MIN_SITELINKS_THRESHOLD", 3))
+MIN_SITELINKS_LOW_PRIORITY = int(os.getenv("MIN_SITELINKS_LOW_PRIORITY", 5))
+ENTITY_SEARCH_LIMIT = int(os.getenv("ENTITY_SEARCH_LIMIT", 10))
+P279_MAX_DEPTH = int(os.getenv("P279_MAX_DEPTH", 1))
+HIGH_PRIORITY_WEIGHT = int(os.getenv("HIGH_PRIORITY_WEIGHT", 1000))
+MEDIUM_PRIORITY_WEIGHT = int(os.getenv("MEDIUM_PRIORITY_WEIGHT", 100))
+LOW_PRIORITY_WEIGHT = int(os.getenv("LOW_PRIORITY_WEIGHT", 10))
+SCIENTIFIC_TERM_BOOST = float(os.getenv("SCIENTIFIC_TERM_BOOST", 1.2))
