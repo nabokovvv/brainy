@@ -17,8 +17,12 @@ from together import AsyncTogether, error
 logger = logging.getLogger(__name__)
 
 THINKING_GUIDANCE = (
-    "IMPORTANT: Think through the task step-by-step inside <think>...</think> tags. "
-    "Keep all reasoning inside the <think> block and provide the final answer only after the closing </think> tag."
+    "IMPORTANT: Your thinking MUST be completely contained within silent <think> tags. "
+    "Begin your response with <think> and think through the task step-by-step. "
+    "Do NOT repeat the user's question or any instructions in your thinking. "
+    "Do NOT mention that you are thinking. "
+    "Keep reasoning concise and focused. "
+    "After completing your thinking, close with </think> and provide ONLY the final answer. "
 )
 
 
@@ -227,7 +231,7 @@ async def get_sub_queries(query: str, lang: str) -> list[str]:
     detected_user_lang = detect_language(query)
     prompt_lang = 'en' if detected_user_lang == 'en' else lang
 
-    prompt = f"""Based on the following query, generate up to 4 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. Three of them should be in "{prompt_lang}" language, and one - in English. Return the sub-queries as a clean JSON list of strings without comments.
+    prompt = f"""Based on the following query, generate up to 4 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. Three of them should be in "{prompt_lang}" language, and one - in English. Return the sub-queries as a clean JSON list of strings without any comments.
 
 {THINKING_GUIDANCE}
 
@@ -521,17 +525,16 @@ async def fast_reply(query: str, lang: str, available_modes: list, translated_mo
     detected_user_lang = detect_language(query)
     prompt_lang = 'en' if detected_user_lang == 'en' else lang
 
-    system_prompt = f"""Your name is Brainy. You are a Telegram bot, but you also have a website: https://askbrainy.com. You are a helpful AI assistant built with free, open-source tools. Your creator's Telegram nickname is @bonbekon. You will always be accessible for free. The core idea behind you is to combine a fast, open-source Large Language Models with real-time context from the internet (a technique called RAG) to provide answers comparable in quality to proprietary models like ChatGPT. Your advantages vs other free AI tools: fast responses to easy everyday questions, actual and unbiased information, free unlimited deep research.
+    system_prompt = f"""Your name is Brainy. You are a Telegram bot and a helpful AI assistant built with free, open-source tools. Your creator's Telegram nickname is @bonbekon. You will always be accessible for free. The core idea behind you is to combine a fast, open-source Large Language Models with real-time context from the internet (a technique called RAG) to provide answers comparable in quality to proprietary models like ChatGPT. Your advantages vs other free AI tools: fast responses to easy everyday questions, actual and unbiased information, free unlimited deep research.
 
 {THINKING_GUIDANCE}
 
-Your goal is to give THE SHORTEST and MOST PRECISE answer possible. No more than 50 words in total. If a more detailed answer is absolutely required, suggest using other modes. Always answer in the "{prompt_lang}" language.
+Your goal is to give a short and precise answer. If a more detailed answer is absolutely required, suggest using other modes. Always answer in the "{prompt_lang}" language.
 
 If you cannot provide a short and precise answer, you MUST explicitly state that you cannot and advise the user to use a more suitable mode:
 - **{translated_mode_names['web_search']}:** Use this for easy questions that need up-to-date information.
 - **{translated_mode_names['deep_search']}:** For more complex questions that do not require deep analysis.
 - **{translated_mode_names['deep_research']}:** For complex research or analysis.
-- **🧠 DeepSeek R1** for coding, writing, logical thinking.
 """
     user_prompt = f"{query}"
 
@@ -545,7 +548,7 @@ If you cannot provide a short and precise answer, you MUST explicitly state that
         "top_k": 50,
         "top_p": 0.9,
         "repetition_penalty": 1.1,
-        "max_tokens": 1200,
+        "max_tokens": 2000,
         "reasoning_effort": "low",
     }
     logger.info(f"Together AI (fast-reply) - System Prompt: {system_prompt}")
@@ -683,22 +686,6 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
     
     logger.info(f"Together AI (generate_summary_from_chunks) - Response: {response_text}")
     return response_text
-
-@retry_on_server_error()
-async def deepseek_r1_reply(query: str, lang: str) -> str:
-    try:
-        system_prompt = f"You are a helpful AI assistant. Always respond in the {lang} language. {THINKING_GUIDANCE}"
-        response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": query}
-            ],
-            max_tokens=4000 # Added max_tokens
-        )
-        return strip_think(data['choices'][0]['message']['content'])
-    except Exception as e:
-        logger.error(f"Together AI (DeepSeek R1) - Request failed: {e}")
-        raise
 
 @retry_on_server_error()
 async def polish_research_answer(summaries: str, query: str, lang: str, translator) -> str:
