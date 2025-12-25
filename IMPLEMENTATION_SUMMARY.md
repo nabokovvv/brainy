@@ -204,8 +204,60 @@ Based on design document recommendations:
 - [x] Controlled P279 depth implemented
 - [x] Enhanced logging added
 - [x] Test suite created
+- [x] SPARQL syntax bug fixed (HTTP 400 error)
+- [x] Query generation validates for all depth values (0, 1, 2)
+- [x] Valid SPARQL 1.1 property path syntax confirmed
 - [ ] Run actual tests with API credentials
 - [ ] Validate Nicosia Russian → Q3856
 - [ ] Validate Nicosia English → Q3856
 - [ ] Regression test on other entities
 - [ ] Performance testing under load
+
+## Post-Fix Update (2025-12-26)
+
+### SPARQL Syntax Bug Fixed
+
+**Issue Identified:**
+The initial implementation used invalid SPARQL syntax `wdt:P31/wdt:P279{0,1}` which caused HTTP 400 Bad Request errors from Wikidata SPARQL endpoint. SPARQL 1.1 property paths do not support numeric range quantifiers `{min,max}`.
+
+**Fix Applied:**
+Replaced invalid syntax with valid SPARQL property path alternatives:
+- Depth 0: `wdt:P31` (direct P31 only)
+- Depth 1: `(wdt:P31|wdt:P31/wdt:P279)` (direct OR one P279 hop)
+- Depth 2+: Cumulative alternative paths joined with `|` operator
+
+**Validation:**
+- Created `test_sparql_syntax.py` to validate query generation
+- All test cases passed (depth 0, 1, 2)
+- Production query (depth=1) generates valid syntax: `(wdt:P31|wdt:P31/wdt:P279)`
+- No more HTTP 400 errors expected
+
+**Files Modified:**
+- `/Users/sergei/Documents/GitHub/brainy/wikidata_mapper.py` - Lines 78-102, fixed `_get_p31_for_qid` function
+- `/Users/sergei/Documents/GitHub/brainy/test_sparql_syntax.py` - New validation test (122 lines)
+- [ ] Validate Nicosia English → Q3856
+- [ ] Regression test on other entities
+- [ ] Performance testing under load
+
+## Post-Fix Update (2025-12-26)
+
+### SPARQL Syntax Bug Fixed
+
+**Issue Identified:**
+The initial implementation used invalid SPARQL syntax `wdt:P31/wdt:P279{0,1}` which caused HTTP 400 Bad Request errors from Wikidata SPARQL endpoint. SPARQL 1.1 property paths do not support numeric range quantifiers `{min,max}`.
+
+**Fix Applied:**
+Replaced invalid syntax with valid SPARQL property path alternatives:
+- Depth 0: `wdt:P31` (direct P31 only)
+- Depth 1: `(wdt:P31|wdt:P31/wdt:P279)` (direct OR one P279 hop)
+- Depth 2+: Cumulative alternative paths joined with `|` operator
+
+**Validation:**
+- Created `test_sparql_syntax.py` to validate query generation
+- All test cases passed (depth 0, 1, 2)
+- Production query (depth=1) generates valid syntax: `(wdt:P31|wdt:P31/wdt:P279)`
+- No more HTTP 400 errors expected
+
+**Files Modified:**
+- `/Users/sergei/Documents/GitHub/brainy/wikidata_mapper.py` - Lines 78-102, fixed `_get_p31_for_qid` function
+- `/Users/sergei/Documents/GitHub/brainy/test_sparql_syntax.py` - New validation test (122 lines)

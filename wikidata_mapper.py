@@ -82,18 +82,24 @@ async def _get_p31_for_qid(client: httpx.AsyncClient, qid: str) -> list[str]:
     
     if max_depth == 0:
         # Direct P31 only, no subclass traversal
-        query = f"""
-        SELECT ?type WHERE {{
-          wd:{qid} wdt:P31 ?type .
-        }}
-        """
+        property_path = "wdt:P31"
+    elif max_depth == 1:
+        # P31 OR (P31 followed by one P279 hop)
+        property_path = "(wdt:P31|wdt:P31/wdt:P279)"
     else:
-        # Limited P279 traversal depth
-        query = f"""
-        SELECT ?type WHERE {{
-          wd:{qid} wdt:P31/wdt:P279{{0,{max_depth}}} ?type .
-        }}
-        """
+        # Build cumulative alternative paths for depth >= 2
+        # Example for depth=2: (wdt:P31|wdt:P31/wdt:P279|wdt:P31/wdt:P279/wdt:P279)
+        paths = ["wdt:P31"]
+        for i in range(1, max_depth + 1):
+            path_segment = "wdt:P31" + "/wdt:P279" * i
+            paths.append(path_segment)
+        property_path = "(" + "|".join(paths) + ")"
+    
+    query = f"""
+    SELECT ?type WHERE {{
+      wd:{qid} {property_path} ?type .
+    }}
+    """
     
     headers = {
         'User-Agent': config.CUSTOM_USER_AGENT,
