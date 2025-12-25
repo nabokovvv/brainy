@@ -582,19 +582,19 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
         if len(fallback_sources) >= 3:
             break
 
-    snippets_by_domain = {}
+    snippets_by_url = {}
     for s in snippets:
         if len(s.text) < 70:
             continue
-        domain = urlparse(s.source_url).netloc
-        if domain not in snippets_by_domain:
-            snippets_by_domain[domain] = []
-        snippets_by_domain[domain].append(s.text)
+        url = s.source_url
+        if url not in snippets_by_url:
+            snippets_by_url[url] = []
+        snippets_by_url[url].append(s.text)
 
     snippet_texts = []
-    for domain, texts in snippets_by_domain.items():
+    for url, texts in snippets_by_url.items():
         combined_text = " ".join(texts)
-        snippet_texts.append(f"- {combined_text} [{domain}]")
+        snippet_texts.append(f"- {combined_text} [{url}]")
 
     snippet_text = "\n\n".join(snippet_texts)
 
