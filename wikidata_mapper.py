@@ -1,11 +1,15 @@
 import httpx
 import json
 import logging
+import asyncio
 import config
 
 logger = logging.getLogger(__name__)
 
 WIKIDATA_SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
+
+# Semaphore to rate limit P31 queries to prevent 429 errors
+P31_SEMAPHORE = asyncio.Semaphore(5)
 
 # Mapping spaCy entity labels to Wikidata 'instance of' (P31) Q-IDs
 
@@ -61,18 +65,21 @@ async def _get_p31_for_qid(client: httpx.AsyncClient, qid: str) -> list[str]:
         'User-Agent': config.CUSTOM_USER_AGENT,
         'Accept': 'application/sparql-results+json'
     }
-    try:
-        response = await client.get(WIKIDATA_SPARQL_ENDPOINT, headers=headers, params={'query': query})
-        response.raise_for_status()
-        data = response.json()
-        bindings = data.get('results', {}).get('bindings', [])
-        return [b['type']['value'].split('/')[-1] for b in bindings]
-    except httpx.RequestError as e:
-        logger.error(f"Error fetching P31 for QID {qid}: {e}")
-        return []
-    except json.JSONDecodeError:
-        logger.error(f"Failed to decode JSON from Wikidata for P31 of QID {qid}. Response: {response.text}")
-        return []
+    
+    # Use semaphore to rate limit P31 queries
+    async with P31_SEMAPHORE:
+        try:
+            response = await client.get(WIKIDATA_SPARQL_ENDPOINT, headers=headers, params={'query': query})
+            response.raise_for_status()
+            data = response.json()
+            bindings = data.get('results', {}).get('bindings', [])
+            return [b['type']['value'].split('/')[-1] for b in bindings]
+        except httpx.RequestError as e:
+            logger.error(f"Error fetching P31 for QID {qid}: {e}")
+            return []
+        except json.JSONDecodeError:
+            logger.error(f"Failed to decode JSON from Wikidata for P31 of QID {qid}. Response: {response.text}")
+            return []
 
 async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang: str, spacy_label: str | None = None) -> str | None:
     """Searches Wikidata for the Q-ID of a given entity text asynchronously, with improved disambiguation."""
