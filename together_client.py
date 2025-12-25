@@ -377,8 +377,8 @@ Example JSON output:
 @retry_on_server_error()
 async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
     # Define model and token limits
-    MODEL_CONTEXT_WINDOW = 10000
-    MAX_OUTPUT_TOKENS = 2400  # Reduced to leave more buffer
+    MODEL_CONTEXT_WINDOW = 12000
+    MAX_OUTPUT_TOKENS = 4000  # Reduced to leave more buffer
     CHAR_PER_TOKEN_ESTIMATE = 3  # More conservative estimate
 
     # --- 1. Construct the static parts of the prompt ---
@@ -615,7 +615,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
         response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            max_tokens=2400
+            max_tokens=4000
         )
         response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
@@ -677,7 +677,7 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
                 {"role": "user", "content": query}
             ],
             temperature=0.2,
-            max_tokens=800
+            max_tokens=2400
         )
         response_text = strip_think(data['choices'][0]['message']['content']).strip()
     except Exception as e:
