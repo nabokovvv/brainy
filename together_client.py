@@ -617,7 +617,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
         response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            max_tokens=6000
+            max_tokens=10000
         )
         response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
