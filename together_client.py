@@ -231,9 +231,14 @@ async def get_sub_queries(query: str, lang: str) -> list[str]:
     detected_user_lang = detect_language(query)
     prompt_lang = 'en' if detected_user_lang == 'en' else lang
 
-    prompt = f"""Based on the following query, generate up to 4 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. Three of them should be in "{prompt_lang}" language, and one - in English. Return the sub-queries as a clean JSON list of strings without any comments.
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
+    prompt = f"""Based on the following query, generate up to 4 sub-queries for a web search to gather the necessary information to provide a comprehensive answer. Try both shorter and longer search queries. Three of them should be in "{prompt_lang}" language, and one - in English.
 
-{THINKING_GUIDANCE}
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your analysis of query complexity and decomposition strategy",
+  "queries": ["sub-query 1", "sub-query 2", "sub-query 3", "sub-query 4"]
+}}
 
 Query from user: {query}"""
     
@@ -244,27 +249,73 @@ Query from user: {query}"""
             temperature=0.7, 
             top_p=0.9
         )
-        response_text = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (sub-queries) - Request failed: {e}")
         raise
 
     logger.info(f"Together AI (sub-queries) - Raw Response: {response_text}")
     
+    # Attempt to parse JSON response
+    parsed_json = None
     sub_queries = []
+    
     try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (sub-queries) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (sub-queries) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"queries"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (sub-queries) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (sub-queries) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (sub-queries) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (sub-queries) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        queries_raw = parsed_json.get('queries', [])
+        
+        # Validate queries field
+        if not isinstance(queries_raw, list):
+            logger.warning(f"Together AI (sub-queries) - 'queries' field is not an array, converting to empty array")
+            queries_raw = []
+        
+        # Validate each query is a non-empty string and limit to 4
+        for q in queries_raw[:4]:
+            if isinstance(q, str) and q.strip():
+                sub_queries.append(q.strip())
+        
+        # Log extracted field info
+        logger.info(f"Together AI (sub-queries) - Extracted fields: thinking_length={len(thinking)}, queries_count={len(sub_queries)}")
+        
+    else:
+        # Fallback to legacy regex extraction
+        logger.error(f"Together AI (sub-queries) - Falling back to legacy regex method")
+        response_text = strip_think(response_text)
         json_match = re.search(r'\[[\s\S]*\]', response_text)
         if json_match:
             json_string = json_match.group(0)
             json_string = re.sub(r"//.*", "", json_string)
             json_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
-            sub_queries = json.loads(json_string)
-        else:
-             logger.warning("Together AI (sub-queries) - No JSON list found in the response.")
-    except json.JSONDecodeError as e:
-        logger.warning(f"Together AI (sub-queries) - Could not decode JSON: {e}. Raw string was: {json_string if 'json_string' in locals() else ''}")
-        sub_queries = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
-        sub_queries = [item for sublist in sub_queries for item in sublist if item]
+            try:
+                sub_queries = json.loads(json_string)
+            except json.JSONDecodeError:
+                pass
+        if not sub_queries:
+            sub_queries = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
+            sub_queries = [item for sublist in sub_queries for item in sublist if item]
 
     logger.info(f"Together AI (sub-queries) - Parsed Sub-queries: {sub_queries}")
     return sub_queries
@@ -281,21 +332,20 @@ async def get_research_steps(query: str, lang: str, entities_info: list) -> list
         for entity in entities_info:
             entity_context += f"- {entity['entity']}\n"
 
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
     prompt = f"""You are a researcher. Break down the user's question into several logical research steps. Use the provided entity details to create more accurate and specific steps. In each step, instead of pronouns, be sure to indicate the full name of the object(s) of research. Also, in each step, keep the general context of the research (user's request). Do not refer to other steps or to the future results of other steps. If it is absolutely necessary to refer to other steps, then repeat the context of what was in the previous steps.
 
 Your response must be in the "{prompt_lang}" language.
 
-Return the steps as a clean JSON list of strings, with a maximum of 6 items in {prompt_lang} language. For example:
-[
-  "Check A",
-  "Review B",
-  "Compare A and B"
-]
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your analysis of query and entity context to plan research",
+  "steps": ["step 1", "step 2", "step 3", "step 4", "step 5", "step 6"]
+}}
 
-{THINKING_GUIDANCE}
+Return a maximum of 6 research steps in {prompt_lang} language.
 
-Query from user: {query}
-"""
+Query from user: {query}"""
     if entity_context:
         prompt += f"{entity_context} EACH QUESTION SHOULD CONTAIN AT LEAST ONE ENTITY NAME"
     
@@ -306,27 +356,73 @@ Query from user: {query}
             temperature=0.7,
             top_p=0.9
         )
-        response_text = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (research-steps) - Request failed: {e}")
         raise
     
     logger.info(f"Together AI (research-steps) - Raw Response: {response_text}")
     
+    # Attempt to parse JSON response
+    parsed_json = None
     steps = []
+    
     try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (research-steps) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (research-steps) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"steps"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (research-steps) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (research-steps) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (research-steps) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (research-steps) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        steps_raw = parsed_json.get('steps', [])
+        
+        # Validate steps field
+        if not isinstance(steps_raw, list):
+            logger.warning(f"Together AI (research-steps) - 'steps' field is not an array, converting to empty array")
+            steps_raw = []
+        
+        # Validate each step is a non-empty string and limit to 6
+        for s in steps_raw[:6]:
+            if isinstance(s, str) and s.strip():
+                steps.append(s.strip())
+        
+        # Log extracted field info
+        logger.info(f"Together AI (research-steps) - Extracted fields: thinking_length={len(thinking)}, steps_count={len(steps)}")
+        
+    else:
+        # Fallback to legacy regex extraction
+        logger.error(f"Together AI (research-steps) - Falling back to legacy regex method")
+        response_text = strip_think(response_text)
         json_match = re.search(r'\[[\s\S]*\]', response_text)
         if json_match:
             json_string = json_match.group(0)
             json_string = re.sub(r"//.*", "", json_string)
             json_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
-            steps = json.loads(json_string)
-        else:
-             logger.warning("Together AI (research-steps) - No JSON list found in the response.")
-    except json.JSONDecodeError as e:
-        logger.warning(f"Together AI (research-steps) - Could not decode JSON: {e}. Raw string was: {json_string if 'json_string' in locals() else ''}")
-        steps = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
-        steps = [item for sublist in steps for item in sublist if item]
+            try:
+                steps = json.loads(json_string)
+            except json.JSONDecodeError:
+                pass
+        if not steps:
+            steps = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
+            steps = [item for sublist in steps for item in sublist if item]
 
     logger.info(f"Together AI (research-steps) - Parsed Steps: {steps}")
     return steps
@@ -341,38 +437,87 @@ async def synthesize_research_answer(query: str, research_data: dict, lang: str)
         formatted_research_data += f"### {step}\n"
         formatted_research_data += f"{summary}\n\n"
 
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
     prompt = f"""You are a chief editor. Your task is to generate an engaging introduction where you highlight some findings of the presented research and a concise TL;DR (Too Long; Didn't Read) summary for a research report based on the provided research items. Your ultimate goal is to help answer the user's query: "{query}".
 
 Your response MUST be in the "{prompt_lang}" language.
 
-Output your response in JSON format with two keys: "intro" and "tldr".
-
-Example JSON output:
-```json
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
 {{
-  "intro": "Your introduction here",
-  "tldr": "Your TL;DR summary here"
+  "thinking": "Your analysis of research data and synthesis strategy",
+  "intro": "Your engaging introduction highlighting key findings",
+  "tldr": "Your concise TL;DR summary"
 }}
-```
 
 **Research Data (Summaries of each research item):**
-{formatted_research_data}
-
-{THINKING_GUIDANCE}
-"""
+{formatted_research_data}"""
+    
     logger.info(f"Together AI (research-synthesis) - Prompt: {prompt}")
     try:
         response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
-        response_text = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (research-synthesis) - Request failed: {e}")
         raise
     
-    logger.info(f"Together AI (research-synthesis) - Response: {response_text}")
-    return response_text
+    logger.info(f"Together AI (research-synthesis) - Raw Response: {response_text}")
+    
+    # Attempt to parse JSON response
+    parsed_json = None
+    result_json_str = ""
+    
+    try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (research-synthesis) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (research-synthesis) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"intro"[\s\S]*?"tldr"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (research-synthesis) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (research-synthesis) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (research-synthesis) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (research-synthesis) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        intro = parsed_json.get('intro', '')
+        tldr = parsed_json.get('tldr', '')
+        
+        # Log extracted field info
+        logger.info(f"Together AI (research-synthesis) - Extracted fields: thinking_length={len(thinking)}, intro_length={len(intro)}, tldr_length={len(tldr)}")
+        
+        # Validate required fields
+        if not intro or not tldr:
+            logger.warning(f"Together AI (research-synthesis) - Missing required fields (intro or tldr)")
+            if not intro:
+                intro = thinking[:500] if thinking else "Introduction not available."
+            if not tldr:
+                tldr = thinking[:200] if thinking else "Summary not available."
+        
+        # Return as JSON string for backward compatibility
+        result_json_str = json.dumps({"intro": intro, "tldr": tldr}, ensure_ascii=False)
+        
+    else:
+        # Fallback to legacy strip_think method
+        logger.error(f"Together AI (research-synthesis) - Falling back to legacy strip_think method")
+        result_json_str = strip_think(response_text)
+    
+    logger.info(f"Together AI (research-synthesis) - Response: {result_json_str}")
+    return result_json_str
 
 @retry_on_server_error()
 async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
@@ -396,8 +541,26 @@ async def synthesize_answer(query: str, research_data: list, lang: str, entities
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    # Base prompt template without the dynamic context
-    base_prompt_template = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed, structured, and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n\n**Instructions:**\n1. **Your response MUST be in the \"{prompt_lang}\" language, regardless of the language of the snippets.**\n2. Synthesize the information from all sub-queries to create a single, coherent answer to the main question.\n3. Information discovered in \"Discovered entities and their details\" is the most reliable, and it is your final source of truth.\n4. {THINKING_GUIDANCE}\n\n**Main Question:** {query}\n{entity_context}\n\n**Context from search results:**\n"""
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
+    base_prompt_template = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed, structured, and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.
+
+**Instructions:**
+1. **Your response MUST be in the "{prompt_lang}" language, regardless of the language of the snippets.**
+2. Synthesize the information from all sub-queries to create a single, coherent answer to the main question.
+3. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth.
+
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your analysis of sub-query results and synthesis strategy",
+  "final": "Your COMPLETE AND DETAILED answer in {prompt_lang} language",
+  "sources": ["https://url1.com", "https://url2.com"]
+}}
+
+**Main Question:** {query}
+{entity_context}
+
+**Context from search results:**
+"""
 
     # --- 2. Calculate available space for dynamic context ---
     base_prompt_char_len = len(base_prompt_template) + len(query) # Also account for user query in messages
@@ -446,13 +609,67 @@ async def synthesize_answer(query: str, research_data: list, lang: str, entities
             max_tokens=MAX_OUTPUT_TOKENS,
             reasoning_effort = "medium"
         )
-        response_text = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (synthesis) - Request failed: {e}")
         raise
     
-    logger.info(f"Together AI (synthesis) - Response: {response_text}")
-    return response_text
+    logger.info(f"Together AI (synthesis) - Raw Response: {response_text}")
+    
+    # Attempt to parse JSON response
+    parsed_json = None
+    final_answer_text = ""
+    
+    try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (synthesis) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (synthesis) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"final"[\s\S]*?"sources"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (synthesis) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (synthesis) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (synthesis) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (synthesis) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        final_answer_text = parsed_json.get('final', '')
+        sources_from_json = parsed_json.get('sources', [])
+        
+        # Log extracted field info
+        logger.info(f"Together AI (synthesis) - Extracted fields: thinking_length={len(thinking)}, final_length={len(final_answer_text)}, sources_count={len(sources_from_json) if isinstance(sources_from_json, list) else 0}")
+        
+        # Validate required fields
+        if not final_answer_text:
+            logger.warning(f"Together AI (synthesis) - Missing or empty 'final' field, using thinking as fallback")
+            final_answer_text = thinking if thinking else response_text
+        
+        # Validate sources field (mandatory but can be empty)
+        if not isinstance(sources_from_json, list):
+            logger.warning(f"Together AI (synthesis) - 'sources' field is not an array, converting to empty array")
+            sources_from_json = []
+        
+        # Note: bot.py will append sources to the answer, so we don't need to do it here
+        logger.info(f"Together AI (synthesis) - Returning answer with {len(sources_from_json)} sources")
+        
+    else:
+        # Fallback to legacy strip_think method
+        logger.error(f"Together AI (synthesis) - Falling back to legacy strip_think method")
+        final_answer_text = strip_think(response_text)
+    
+    return final_answer_text
 
 def contains_chinese(text: str) -> bool:
     return bool(re.search(r'[\u4e00-\u9fff]', text))
@@ -748,7 +965,20 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
                 entity_context += f"  Lead Paragraph: {entity['lead_paragraph']}\n"
             entity_context += f"  QID: {entity['qid']}\n"
 
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.\n{entity_context}\n\nRules: 1. Double check you don't repeat yourself and provide only unique and detailed information. 2. Answer in the "{prompt_lang}" language. 3. Do not add any information not present in the snippets. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. **Crucially, cite your sources in square brackets (strictly follow this format: "[[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)]") directly within the text where the information is used.** 7. {THINKING_GUIDANCE}\nContext snippets: {snippet_text}"""
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query.
+{entity_context}
+
+Rules: 1. Double check you don't repeat yourself and provide only unique and detailed information. 2. Answer in the "{prompt_lang}" language. 3. Do not add any information not present in the snippets. 4. Stick closer to the language and style of provided context snippets. 5. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth. 6. **Crucially, cite your sources in square brackets (strictly follow this format: "[[https://www.kommersant.ru/doc/7566968](https://www.kommersant.ru/doc/7566968)]") directly within the text where the information is used.**
+
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your analysis of chunks and relevance to research step",
+  "final": "Your COMPLETE AND DETAILED answer with inline citations in {prompt_lang} language",
+  "sources": ["https://url1.com", "https://url2.com"]
+}}
+
+Context snippets: {snippet_text}"""
     
     logger.info(f"Together AI (generate_summary_from_chunks) - Prompt: {prompt}")
     try:
@@ -760,13 +990,73 @@ async def generate_summary_from_chunks(query: str, snippets: list, lang: str, tr
             temperature=0.2,
             max_tokens=5000
         )
-        response_text = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (generate_summary_from_chunks) - Request failed: {e}")
         raise
     
-    logger.info(f"Together AI (generate_summary_from_chunks) - Response: {response_text}")
-    return response_text
+    logger.info(f"Together AI (generate_summary_from_chunks) - Raw Response: {response_text}")
+    
+    # Attempt to parse JSON response
+    parsed_json = None
+    final_answer_text = ""
+    
+    try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (generate_summary_from_chunks) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (generate_summary_from_chunks) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"final"[\s\S]*?"sources"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (generate_summary_from_chunks) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (generate_summary_from_chunks) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (generate_summary_from_chunks) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (generate_summary_from_chunks) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        final_answer_text = parsed_json.get('final', '')
+        sources_from_json = parsed_json.get('sources', [])
+        
+        # Log extracted field info
+        logger.info(f"Together AI (generate_summary_from_chunks) - Extracted fields: thinking_length={len(thinking)}, final_length={len(final_answer_text)}, sources_count={len(sources_from_json) if isinstance(sources_from_json, list) else 0}")
+        
+        # Validate required fields
+        if not final_answer_text:
+            logger.warning(f"Together AI (generate_summary_from_chunks) - Missing or empty 'final' field, using thinking as fallback")
+            final_answer_text = thinking if thinking else response_text
+        
+        # Validate sources field (mandatory but can be empty)
+        if not isinstance(sources_from_json, list):
+            logger.warning(f"Together AI (generate_summary_from_chunks) - 'sources' field is not an array, converting to empty array")
+            sources_from_json = []
+        
+        # Validate source URLs
+        validated_sources = []
+        for src in sources_from_json:
+            if isinstance(src, str) and (src.startswith('http://') or src.startswith('https://')):
+                if src not in validated_sources:
+                    validated_sources.append(src)
+        
+        logger.info(f"Together AI (generate_summary_from_chunks) - Validated {len(validated_sources)} sources from JSON")
+        
+    else:
+        # Fallback to legacy strip_think method
+        logger.error(f"Together AI (generate_summary_from_chunks) - Falling back to legacy strip_think method")
+        final_answer_text = strip_think(response_text)
+    
+    return final_answer_text
 
 @retry_on_server_error()
 async def polish_research_answer(summaries: str, query: str, lang: str, translator) -> str:
@@ -778,6 +1068,7 @@ async def polish_research_answer(summaries: str, query: str, lang: str, translat
     CHAR_PER_TOKEN_ESTIMATE = 3  # Conservative estimate
 
     # --- 2. Calculate available space for summaries ---
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
     prompt_template = f"""You are a chief researcher. Answer the user's query based on the research data provided to you. 
 
 **User Query:** {query}
@@ -791,12 +1082,12 @@ async def polish_research_answer(summaries: str, query: str, lang: str, translat
 3. Your final answer should be very detailed, complete, coherent, and well-structured
 4. Minimal desired output is 500 words. The more the better. Max allowed output is 4000 words.
 5. Stick closer to the language and style of provided context snippets.
-6. Readability: One to three lines per paragraph. One idea per sentence. Don’t be afraid of sentence fragments. (e.g., “It’s more effective. And easier to read.”). Use punchy phrases that grab a skimming reader and hand them off to the next line to keep people engaged:
+6. Readability: One to three lines per paragraph. One idea per sentence. Don't be afraid of sentence fragments. (e.g., "It's more effective. And easier to read."). Use punchy phrases that grab a skimming reader and hand them off to the next line to keep people engaged:
 In other words…
 Which means:
 Why?
 Why not?
-Here’s why.
+Here's why.
 For example:
 Like this:
 However:
@@ -807,18 +1098,24 @@ EXAMPLE:
 
 Not great:
 
-“Adding recognizable customer logos, star ratings, and short testimonials to a landing page builds trust and reduces perceived risk, which lowers friction in the decision process and typically improves click-through rates on calls-to-action.”
+"Adding recognizable customer logos, star ratings, and short testimonials to a landing page builds trust and reduces perceived risk, which lowers friction in the decision process and typically improves click-through rates on calls-to-action."
 
 Better:
 
 "Social proof lowers friction on landing pages.
 
-Here’s why:
+Here's why:
 
-Logos, ratings, and quick testimonials answer “Is this legit?” fast—so more visitors keep reading and more of them click the CTA."
+Logos, ratings, and quick testimonials answer "Is this legit?" fast—so more visitors keep reading and more of them click the CTA."
 
 7. Your final answer must be in the "{lang}" language.
-8. {THINKING_GUIDANCE}"""
+
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your analysis of summaries and final synthesis strategy",
+  "final": "Your COMPLETE, DETAILED, and POLISHED answer in {lang} language with inline citations",
+  "sources": ["https://url1.com", "https://url2.com"]
+}}"""
     
     base_prompt_len = len(prompt_template.format(summaries=''))
     max_summaries_len = (MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS) * CHAR_PER_TOKEN_ESTIMATE - base_prompt_len
@@ -840,11 +1137,65 @@ Logos, ratings, and quick testimonials answer “Is this legit?” fast—so mor
             temperature=0.5,
             max_tokens=MAX_OUTPUT_TOKENS
         )
-        # ВАЖНО: теперь ответ — dict; берём content и срезаем <think>
-        polished_text = strip_think(data["choices"][0]["message"]["content"]).strip()
+        response_text = data["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.error(f"Together AI (polish-research) - Request failed: {e}")
         return "Error: Could not generate the final research answer."
+    
+    logger.info(f"Together AI (polish-research) - Raw Response: {response_text}")
+    
+    # Attempt to parse JSON response
+    parsed_json = None
+    polished_text = ""
+    
+    try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (polish-research) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (polish-research) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"final"[\s\S]*?"sources"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (polish-research) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (polish-research) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (polish-research) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (polish-research) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        polished_text = parsed_json.get('final', '')
+        sources_from_json = parsed_json.get('sources', [])
+        
+        # Log extracted field info
+        logger.info(f"Together AI (polish-research) - Extracted fields: thinking_length={len(thinking)}, final_length={len(polished_text)}, sources_count={len(sources_from_json) if isinstance(sources_from_json, list) else 0}")
+        
+        # Validate required fields
+        if not polished_text:
+            logger.warning(f"Together AI (polish-research) - Missing or empty 'final' field, using thinking as fallback")
+            polished_text = thinking if thinking else "Error: Could not generate the final research answer."
+        
+        # Validate sources field (mandatory but can be empty)
+        if not isinstance(sources_from_json, list):
+            logger.warning(f"Together AI (polish-research) - 'sources' field is not an array, converting to empty array")
+            sources_from_json = []
+        
+        # Log source count (sources are already embedded in the text with inline citations)
+        logger.info(f"Together AI (polish-research) - Returning polished answer with {len(sources_from_json)} sources in JSON")
+        
+    else:
+        # Fallback to legacy strip_think method
+        logger.error(f"Together AI (polish-research) - Falling back to legacy strip_think method")
+        polished_text = strip_think(response_text)
     
     logger.info(f"Together AI (polish-research) - Final answer received.")
     return polished_text
@@ -852,9 +1203,17 @@ Logos, ratings, and quick testimonials answer “Is this legit?” fast—so mor
 @retry_on_server_error()
 async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
     """Summarizes a single chunk of research data in the context of the user's query."""
+    # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
     prompt = f"""You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and well-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
 
-Provide only the summary of the text below, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets: their domains or full urls if available. {THINKING_GUIDANCE}
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your analysis of chunk content and relevance to query",
+  "final": "Your detailed summary in {lang} language with citations in square brackets (domains or full URLs)",
+  "sources": ["https://url1.com", "domain.com"]
+}}
+
+Provide only the summary in the 'final' field, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets.
 
 **Research Draft Chunk:**
 
@@ -867,10 +1226,61 @@ Provide only the summary of the text below, with no extra comments or introducti
             temperature=0.2, # Factual summarization
             max_tokens=4000 # Allow for a decent summary length, but not too long
         )
-        summary = strip_think(data['choices'][0]['message']['content']).strip()
+        response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Together AI (summarize-chunk) - Request failed: {e}")
         return "" # Return an empty string if summarization fails
     
+    logger.info(f"Together AI (summarize-chunk) - Raw Response: {response_text}")
+    
+    # Attempt to parse JSON response
+    parsed_json = None
+    summary_text = ""
+    
+    try:
+        # Try direct JSON parsing
+        parsed_json = json.loads(response_text)
+        logger.info(f"Together AI (summarize-chunk) - Successfully parsed JSON directly")
+    except json.JSONDecodeError:
+        logger.warning(f"Together AI (summarize-chunk) - Direct JSON parse failed, attempting regex extraction")
+        # Try regex extraction
+        json_pattern = re.compile(r'\{[\s\S]*?"thinking"[\s\S]*?"final"[\s\S]*?"sources"[\s\S]*?\}', re.DOTALL)
+        match = json_pattern.search(response_text)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info(f"Together AI (summarize-chunk) - Successfully extracted JSON via regex")
+            except json.JSONDecodeError:
+                logger.error(f"Together AI (summarize-chunk) - Regex extraction found JSON-like structure but parsing failed")
+        else:
+            logger.error(f"Together AI (summarize-chunk) - No JSON structure found in response")
+    
+    # Process JSON if successfully parsed
+    if parsed_json:
+        # Log full JSON response
+        logger.info(f"Together AI (summarize-chunk) - Full JSON Response:\n{json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+        
+        # Extract fields with validation
+        thinking = parsed_json.get('thinking', '')
+        summary_text = parsed_json.get('final', '')
+        sources_from_json = parsed_json.get('sources', [])
+        
+        # Log extracted field info
+        logger.info(f"Together AI (summarize-chunk) - Extracted fields: thinking_length={len(thinking)}, final_length={len(summary_text)}, sources_count={len(sources_from_json) if isinstance(sources_from_json, list) else 0}")
+        
+        # Validate required fields
+        if not summary_text:
+            logger.warning(f"Together AI (summarize-chunk) - Missing or empty 'final' field, using thinking as fallback")
+            summary_text = thinking if thinking else ""
+        
+        # Validate sources field (mandatory but can be empty)
+        if not isinstance(sources_from_json, list):
+            logger.warning(f"Together AI (summarize-chunk) - 'sources' field is not an array")
+        
+    else:
+        # Fallback to legacy strip_think method
+        logger.error(f"Together AI (summarize-chunk) - Falling back to legacy strip_think method")
+        summary_text = strip_think(response_text)
+    
     logger.info(f"Together AI (summarize-chunk) - Summary received.")
-    return summary
+    return summary_text
