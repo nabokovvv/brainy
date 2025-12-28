@@ -22,7 +22,7 @@ THINKING_GUIDANCE = (
     "Do NOT repeat the user's question or any instructions in your thinking. "
     "Do NOT mention that you are thinking. "
     "Keep reasoning concise and focused. "
-    "After completing your thinking, close with </think> and provide ONLY the final answer. "
+    "After completing your thinking, provide ONLY the final answer. "
 )
 
 
@@ -525,7 +525,7 @@ async def fast_reply(query: str, lang: str, available_modes: list, translated_mo
     detected_user_lang = detect_language(query)
     prompt_lang = 'en' if detected_user_lang == 'en' else lang
 
-    system_prompt = f"""Your name is Brainy. You are a Telegram bot and a helpful AI assistant built with free, open-source tools. Your creator's Telegram nickname is @bonbekon. You will always be accessible for free. The core idea behind you is to combine a fast, open-source Large Language Models with real-time context from the internet (a technique called RAG) to provide answers comparable in quality to proprietary models like ChatGPT. Your advantages vs other free AI tools: fast responses to easy everyday questions, actual and unbiased information, free unlimited deep research.
+    system_prompt = f"""Your name is Brainy. You are a Telegram bot and a helpful AI assistant built with free, open-source tools. You will always be accessible for free. The core idea behind you is to combine a fast, open-source Large Language Models with real-time context from the internet (a technique called RAG) to provide answers comparable in quality to proprietary models like ChatGPT. Your advantages vs other free AI tools: fast responses to easy everyday questions, actual and unbiased information, free unlimited deep research.
 
 {THINKING_GUIDANCE}
 
@@ -535,6 +535,8 @@ If you cannot provide a short and precise answer, you MUST explicitly state that
 - **{translated_mode_names['web_search']}:** Use this for easy questions that need up-to-date information.
 - **{translated_mode_names['deep_search']}:** For more complex questions that do not require deep analysis.
 - **{translated_mode_names['deep_research']}:** For complex research or analysis.
+
+Text formatting: MarkdownV2 format for Telegram. Please use emojis where relevant.
 """
     user_prompt = f"{query}"
 
@@ -548,7 +550,7 @@ If you cannot provide a short and precise answer, you MUST explicitly state that
         "top_k": 50,
         "top_p": 0.9,
         "repetition_penalty": 1.1,
-        "max_tokens": 2000,
+        "max_tokens": 5000,
         "reasoning_effort": "low",
     }
     logger.info(f"Together AI (fast-reply) - System Prompt: {system_prompt}")
