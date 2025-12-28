@@ -1069,7 +1069,7 @@ async def polish_research_answer(summaries: str, query: str, lang: str, translat
 
     # --- 2. Calculate available space for summaries ---
     # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
-    prompt_template = f"""You are a chief researcher. Answer the user's query based on the research data provided to you. 
+    prompt_template = """You are a chief researcher. Answer the user's query based on the research data provided to you. 
 
 **User Query:** {query}
 
@@ -1111,13 +1111,13 @@ Logos, ratings, and quick testimonials answer "Is this legit?" fast—so more vi
 7. Your final answer must be in the "{lang}" language.
 
 IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
-{{
+{{{{
   "thinking": "Your analysis of summaries and final synthesis strategy",
   "final": "Your COMPLETE, DETAILED, and POLISHED answer in {lang} language with inline citations",
   "sources": ["https://url1.com", "https://url2.com"]
-}}"""
+}}}}"""
     
-    base_prompt_len = len(prompt_template.format(summaries=''))
+    base_prompt_len = len(prompt_template.format(summaries='', query=query, lang=lang))
     max_summaries_len = (MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS) * CHAR_PER_TOKEN_ESTIMATE - base_prompt_len
 
     # --- 3. Truncate summaries if they are too long ---
@@ -1126,7 +1126,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
         summaries = summaries[:max_summaries_len]
 
     # --- 4. Final API Call ---
-    final_prompt = prompt_template.format(summaries=summaries)
+    final_prompt = prompt_template.format(summaries=summaries, query=query, lang=lang)
 
     logger.info(f"Together AI (polish-research) - Final prompt to be sent: {final_prompt}")
     logger.info(f"Together AI (polish-research) - Prompting to synthesize final answer. Final summaries length: {len(summaries)} chars.")
@@ -1204,14 +1204,14 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
 async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
     """Summarizes a single chunk of research data in the context of the user's query."""
     # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
-    prompt = f"""You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and well-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
+    prompt = """You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and well-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
 
 IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
-{{
+{{{{
   "thinking": "Your analysis of chunk content and relevance to query",
   "final": "Your detailed summary in {lang} language with citations in square brackets (domains or full URLs)",
   "sources": ["https://url1.com", "domain.com"]
-}}
+}}}}
 
 Provide only the summary in the 'final' field, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets.
 
