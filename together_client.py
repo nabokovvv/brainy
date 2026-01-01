@@ -31,6 +31,7 @@ LLAMA_FREE = config.TOGETHER_MODEL
 DEEPSEEK_FREE = config.TOGETHER_DEEPSEEK
 API_URL = "https://api.together.xyz/v1/chat/completions"
 
+
 def _other_free(model_str: str) -> str:
     m = (model_str or "").lower()
     if "apriel-1.6" in m:
@@ -48,11 +49,13 @@ def _other_free(model_str: str) -> str:
 _model_next_ok = {}
 _model_lock = asyncio.Lock()
 
+
 def _headers_lower(h):
     try:
         return {k.lower(): v for k, v in h.items()}
     except Exception:
         return {}
+
 
 def _parse_rate_headers(h) -> dict:
     hl = _headers_lower(h)
@@ -68,8 +71,10 @@ def _parse_rate_headers(h) -> dict:
         "retry_after": _f("retry-after", None),
     }
 
+
 def _get_next_ok(model: str) -> float:
     return _model_next_ok.get(model, 0.0)
+
 
 def _choose_model_prefer_llama() -> str:
     """Choose the model with sooner availability; prefer Llama if both ready now."""
@@ -80,12 +85,14 @@ def _choose_model_prefer_llama() -> str:
         return LLAMA_FREE
     return LLAMA_FREE if llama_ready_in <= deep_ready_in else DEEPSEEK_FREE
 
+
 async def _wait_if_needed(model: str):
     now = asyncio.get_event_loop().time()
     async with _model_lock:
         t = _model_next_ok.get(model, 0.0)
     if t > now:
         await asyncio.sleep(t - now)
+
 
 async def _respect_headers(model: str, headers, pace_after_success: bool = True):
     meta = _parse_rate_headers(headers)
@@ -108,6 +115,7 @@ async def _respect_headers(model: str, headers, pace_after_success: bool = True)
     if delay > 0:
         async with _model_lock:
             _model_next_ok[model] = max(next_ok, now + delay)
+
 
 async def _chat_once(*, model: str, messages: list, **kwargs) -> dict:
     """Raw Together call that obeys per-second headers. Returns JSON dict."""
@@ -140,6 +148,7 @@ async def _chat_once(*, model: str, messages: list, **kwargs) -> dict:
             raise error.ServiceUnavailableError(str(body))
         else:
             resp.raise_for_status()
+
 
 async def chat_with_fallback(*, model: str | None = None, messages: list, immediate_on_429: bool = True, **gen_kwargs) -> dict:
     """Use the caller-provided `model` as PRIMARY; on 429/503/timeout, immediately try the OTHER free model.
@@ -216,7 +225,7 @@ def retry_on_server_error(retries=4, delay=2, backoff=2):
                         # Also set the shared cooldown
                         async with _rate_limit_state["lock"]:
                             _rate_limit_state["until"] = asyncio.get_event_loop().time() + wait_time
-                    
+                     
                     logger.warning(log_message, exc_info=True)
                     await asyncio.sleep(wait_time)
 
@@ -308,7 +317,7 @@ Query from user: {query}"""
         if json_match:
             json_string = json_match.group(0)
             json_string = re.sub(r"//.*", "", json_string)
-            json_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
+            json_string = re.sub(r",\s*([\]}\])", r"\1", json_string)
             try:
                 sub_queries = json.loads(json_string)
             except json.JSONDecodeError:
@@ -360,13 +369,13 @@ Query from user: {query}"""
     except Exception as e:
         logger.error(f"Together AI (research-steps) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (research-steps) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     steps = []
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -384,7 +393,7 @@ Query from user: {query}"""
                 logger.error(f"Together AI (research-steps) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (research-steps) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -415,7 +424,7 @@ Query from user: {query}"""
         if json_match:
             json_string = json_match.group(0)
             json_string = re.sub(r"//.*", "", json_string)
-            json_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
+            json_string = re.sub(r",\s*([\]}\])", r"\1", json_string)
             try:
                 steps = json.loads(json_string)
             except json.JSONDecodeError:
@@ -462,13 +471,13 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
     except Exception as e:
         logger.error(f"Together AI (research-synthesis) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (research-synthesis) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     result_json_str = ""
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -486,7 +495,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
                 logger.error(f"Together AI (research-synthesis) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (research-synthesis) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -515,7 +524,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
         # Fallback to legacy strip_think method
         logger.error(f"Together AI (research-synthesis) - Falling back to legacy strip_think method")
         result_json_str = strip_think(response_text)
-    
+
     logger.info(f"Together AI (research-synthesis) - Response: {result_json_str}")
     return result_json_str
 
@@ -596,7 +605,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
 
     # --- 4. Assemble the final prompt and make the API call ---
     final_prompt = base_prompt_template + formatted_contexts
-    
+
     logger.info(f"Together AI (synthesis) - Final Prompt Length: {len(final_prompt)} chars")
     try:
         response = data = await _chat_once(
@@ -613,13 +622,13 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
     except Exception as e:
         logger.error(f"Together AI (synthesis) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (synthesis) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     final_answer_text = ""
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -637,7 +646,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
                 logger.error(f"Together AI (synthesis) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (synthesis) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -668,7 +677,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
         # Fallback to legacy strip_think method
         logger.error(f"Together AI (synthesis) - Falling back to legacy strip_think method")
         final_answer_text = strip_think(response_text)
-    
+
     return final_answer_text
 
 def contains_chinese(text: str) -> bool:
@@ -710,7 +719,7 @@ async def prompt_without_context(query: str, lang: str, model: str = None, param
     
 Question from the user: {query}
 """
-    
+
     final_model = model if model is not None else config.TOGETHER_MODEL
     final_params = params if params is not None else {
         "temperature": 0.3, "top_k": 50, "top_p": 0.9, 
@@ -732,7 +741,7 @@ Question from the user: {query}
     except Exception as e:
         logger.error(f"Together AI (prompt_without_context) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (prompt_without_context) - Response: {response_text}")
     final_answer = await translate_if_needed(query, response_text)
     return final_answer
@@ -778,7 +787,7 @@ Text formatting: MarkdownV2 format for Telegram. Please use emojis where relevan
     except Exception as e:
         logger.error(f"Together AI (fast-reply) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (fast-reply) - Response: {response_text}")
     return response_text
 
@@ -842,14 +851,14 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
     except Exception as e:
         logger.error(f"Together AI (generate_answer_from_serp) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (generate_answer_from_serp) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     final_answer_text = ""
     sources_from_json = []
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -867,7 +876,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
                 logger.error(f"Together AI (generate_answer_from_serp) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (generate_answer_from_serp) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -908,7 +917,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
         # Fallback to legacy strip_think method
         logger.error(f"Together AI (generate_answer_from_serp) - Falling back to legacy strip_think method")
         final_answer_text = strip_think(response_text)
-    
+
     # Determine final sources to display (max 3)
     top_sources = []
     if sources_from_json:
@@ -922,7 +931,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
     
     # Construct final answer with sources
     final_answer = final_answer_text
-    
+
     if top_sources:
         final_answer += f"\n\n{translator.get_string('sources_label', lang)}:\n"
         for i, url in enumerate(top_sources):
@@ -994,13 +1003,13 @@ Context snippets: {snippet_text}"""
     except Exception as e:
         logger.error(f"Together AI (generate_summary_from_chunks) - Request failed: {e}")
         raise
-    
+
     logger.info(f"Together AI (generate_summary_from_chunks) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     final_answer_text = ""
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -1018,7 +1027,7 @@ Context snippets: {snippet_text}"""
                 logger.error(f"Together AI (generate_summary_from_chunks) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (generate_summary_from_chunks) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -1055,7 +1064,7 @@ Context snippets: {snippet_text}"""
         # Fallback to legacy strip_think method
         logger.error(f"Together AI (generate_summary_from_chunks) - Falling back to legacy strip_think method")
         final_answer_text = strip_think(response_text)
-    
+
     return final_answer_text
 
 @retry_on_server_error()
@@ -1111,12 +1120,12 @@ Logos, ratings, and quick testimonials answer "Is this legit?" fast—so more vi
 7. Your final answer must be in the "{lang}" language.
 
 IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
-{{{{
+{{
   "thinking": "Your analysis of summaries and final synthesis strategy",
   "final": "Your COMPLETE, DETAILED, and POLISHED answer in {lang} language with inline citations",
   "sources": ["https://url1.com", "https://url2.com"]
-}}}}"""
-    
+}}"""
+
     base_prompt_len = len(prompt_template.format(summaries='', query=query, lang=lang))
     max_summaries_len = (MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS) * CHAR_PER_TOKEN_ESTIMATE - base_prompt_len
 
@@ -1141,13 +1150,13 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
     except Exception as e:
         logger.error(f"Together AI (polish-research) - Request failed: {e}")
         return "Error: Could not generate the final research answer."
-    
+
     logger.info(f"Together AI (polish-research) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     polished_text = ""
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -1165,7 +1174,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
                 logger.error(f"Together AI (polish-research) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (polish-research) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -1196,7 +1205,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
         # Fallback to legacy strip_think method
         logger.error(f"Together AI (polish-research) - Falling back to legacy strip_think method")
         polished_text = strip_think(response_text)
-    
+
     logger.info(f"Together AI (polish-research) - Final answer received.")
     return polished_text
 
@@ -1207,11 +1216,11 @@ async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
     prompt = """You are a research assistant. Analyze this piece of the research draft and summarize in a detailed and well-structured way the key information that can help partly or fully answer the user's main query, which is: '{query}'.
 
 IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
-{{{{
+{{
   "thinking": "Your analysis of chunk content and relevance to query",
   "final": "Your detailed summary in {lang} language with citations in square brackets (domains or full URLs)",
   "sources": ["https://url1.com", "domain.com"]
-}}}}
+}}
 
 Provide only the summary in the 'final' field, with no extra comments or introductions. Stick closer to the language and style of provided context snippets. The summary must be in the "{lang}" language. Don't forget to cite sources (if any) in square brackets.
 
@@ -1230,13 +1239,13 @@ Provide only the summary in the 'final' field, with no extra comments or introdu
     except Exception as e:
         logger.error(f"Together AI (summarize-chunk) - Request failed: {e}")
         return "" # Return an empty string if summarization fails
-    
+
     logger.info(f"Together AI (summarize-chunk) - Raw Response: {response_text}")
-    
+
     # Attempt to parse JSON response
     parsed_json = None
     summary_text = ""
-    
+
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -1254,7 +1263,7 @@ Provide only the summary in the 'final' field, with no extra comments or introdu
                 logger.error(f"Together AI (summarize-chunk) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (summarize-chunk) - No JSON structure found in response")
-    
+
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -1276,11 +1285,11 @@ Provide only the summary in the 'final' field, with no extra comments or introdu
         # Validate sources field (mandatory but can be empty)
         if not isinstance(sources_from_json, list):
             logger.warning(f"Together AI (summarize-chunk) - 'sources' field is not an array")
-        
+
     else:
         # Fallback to legacy strip_think method
         logger.error(f"Together AI (summarize-chunk) - Falling back to legacy strip_think method")
         summary_text = strip_think(response_text)
-    
+
     logger.info(f"Together AI (summarize-chunk) - Summary received.")
     return summary_text
