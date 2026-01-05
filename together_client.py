@@ -25,12 +25,10 @@ THINKING_GUIDANCE = (
     "After completing your thinking, provide ONLY the final answer. "
 )
 
-
 # === Header-aware rate limiter & free-model fallback ===
 LLAMA_FREE = config.TOGETHER_MODEL
 DEEPSEEK_FREE = config.TOGETHER_DEEPSEEK
 API_URL = "https://api.together.xyz/v1/chat/completions"
-
 
 def _other_free(model_str: str) -> str:
     m = (model_str or "").lower()
@@ -45,17 +43,14 @@ def _other_free(model_str: str) -> str:
     # default fallback if unknown
     return DEEPSEEK_FREE
 
-
 _model_next_ok = {}
 _model_lock = asyncio.Lock()
-
 
 def _headers_lower(h):
     try:
         return {k.lower(): v for k, v in h.items()}
     except Exception:
         return {}
-
 
 def _parse_rate_headers(h) -> dict:
     hl = _headers_lower(h)
@@ -71,10 +66,8 @@ def _parse_rate_headers(h) -> dict:
         "retry_after": _f("retry-after", None),
     }
 
-
 def _get_next_ok(model: str) -> float:
     return _model_next_ok.get(model, 0.0)
-
 
 def _choose_model_prefer_llama() -> str:
     """Choose the model with sooner availability; prefer Llama if both ready now."""
@@ -85,14 +78,12 @@ def _choose_model_prefer_llama() -> str:
         return LLAMA_FREE
     return LLAMA_FREE if llama_ready_in <= deep_ready_in else DEEPSEEK_FREE
 
-
 async def _wait_if_needed(model: str):
     now = asyncio.get_event_loop().time()
     async with _model_lock:
         t = _model_next_ok.get(model, 0.0)
     if t > now:
         await asyncio.sleep(t - now)
-
 
 async def _respect_headers(model: str, headers, pace_after_success: bool = True):
     meta = _parse_rate_headers(headers)
@@ -115,7 +106,6 @@ async def _respect_headers(model: str, headers, pace_after_success: bool = True)
     if delay > 0:
         async with _model_lock:
             _model_next_ok[model] = max(next_ok, now + delay)
-
 
 async def _chat_once(*, model: str, messages: list, **kwargs) -> dict:
     """Raw Together call that obeys per-second headers. Returns JSON dict."""
@@ -148,7 +138,6 @@ async def _chat_once(*, model: str, messages: list, **kwargs) -> dict:
             raise error.ServiceUnavailableError(str(body))
         else:
             resp.raise_for_status()
-
 
 async def chat_with_fallback(*, model: str | None = None, messages: list, immediate_on_429: bool = True, **gen_kwargs) -> dict:
     """Use the caller-provided `model` as PRIMARY; on 429/503/timeout, immediately try the OTHER free model.
@@ -225,7 +214,7 @@ def retry_on_server_error(retries=4, delay=2, backoff=2):
                         # Also set the shared cooldown
                         async with _rate_limit_state["lock"]:
                             _rate_limit_state["until"] = asyncio.get_event_loop().time() + wait_time
-                     
+                      
                     logger.warning(log_message, exc_info=True)
                     await asyncio.sleep(wait_time)
 
@@ -234,6 +223,7 @@ def retry_on_server_error(retries=4, delay=2, backoff=2):
                         _delay *= backoff
         return wrapper
     return decorator
+
 
 @retry_on_server_error()
 async def get_sub_queries(query: str, lang: str) -> list[str]:
@@ -363,7 +353,8 @@ Query from user: {query}"""
         response = data = await chat_with_fallback(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            top_p=0.9
+            top_p=0.9,
+            max_tokens=8000
         )
         response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
@@ -371,11 +362,11 @@ Query from user: {query}"""
         raise
 
     logger.info(f"Together AI (research-steps) - Raw Response: {response_text}")
-
+    
     # Attempt to parse JSON response
     parsed_json = None
     steps = []
-
+    
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -393,7 +384,7 @@ Query from user: {query}"""
                 logger.error(f"Together AI (research-steps) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (research-steps) - No JSON structure found in response")
-
+    
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -436,6 +427,7 @@ Query from user: {query}"""
     logger.info(f"Together AI (research-steps) - Parsed Steps: {steps}")
     return steps
 
+
 @retry_on_server_error()
 async def synthesize_research_answer(query: str, research_data: dict, lang: str) -> str:
     detected_user_lang = detect_language(query)
@@ -473,11 +465,11 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
         raise
 
     logger.info(f"Together AI (research-synthesis) - Raw Response: {response_text}")
-
+    
     # Attempt to parse JSON response
     parsed_json = None
     result_json_str = ""
-
+    
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -495,7 +487,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
                 logger.error(f"Together AI (research-synthesis) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (research-synthesis) - No JSON structure found in response")
-
+    
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -527,6 +519,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
 
     logger.info(f"Together AI (research-synthesis) - Response: {result_json_str}")
     return result_json_str
+
 
 @retry_on_server_error()
 async def synthesize_answer(query: str, research_data: list, lang: str, entities_info: list) -> str:
@@ -624,11 +617,11 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
         raise
 
     logger.info(f"Together AI (synthesis) - Raw Response: {response_text}")
-
+    
     # Attempt to parse JSON response
     parsed_json = None
     final_answer_text = ""
-
+    
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -646,7 +639,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
                 logger.error(f"Together AI (synthesis) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (synthesis) - No JSON structure found in response")
-
+    
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -709,6 +702,7 @@ async def translate_if_needed(query: str, original_answer: str) -> str:
         logger.error(f"Together AI (prompt_without_context) - Translation failed: {e}")
         raise
 
+
 @retry_on_server_error()
 async def prompt_without_context(query: str, lang: str, model: str = None, params: dict = None) -> str:
     detected_user_lang = detect_language(query)
@@ -745,6 +739,7 @@ Question from the user: {query}
     logger.info(f"Together AI (prompt_without_context) - Response: {response_text}")
     final_answer = await translate_if_needed(query, response_text)
     return final_answer
+
 
 @retry_on_server_error()
 async def fast_reply(query: str, lang: str, available_modes: list, translated_mode_names: dict) -> str:
@@ -790,6 +785,7 @@ Text formatting: MarkdownV2 format for Telegram. Please use emojis where relevan
 
     logger.info(f"Together AI (fast-reply) - Response: {response_text}")
     return response_text
+
 
 @retry_on_server_error()
 async def generate_answer_from_serp(query: str, snippets: list, lang: str, translator, entities_info: list) -> str:
@@ -838,7 +834,21 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
             entity_context += f"  QID: {entity['qid']}\n"
 
     # JSON-formatted prompt - removed THINKING_GUIDANCE and added JSON instructions
-    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities and write it in you "final" string in JSON format. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".\n{entity_context}\n\nRules: 1. Double check you don't repeat yourself and provide only unique and detailed information. 2. Answer in the "{prompt_lang}" language. 3. Stick closer to the language and style of provided context snippets. 4. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth.\n\nContext snippets: {snippet_text}\n\nIMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:\n{{\n  "thinking": "Your internal analysis of the query and context here",\n  "final": "Your COMPLETE AND DETAILED answer to the user in {prompt_lang} language",\n  "sources": ["https://full-url-1.com", "https://full-url-2.com", "https://full-url-3.com"]\n}}\n\nInclude up to 5 most relevant source URLs (complete URLs, not domains) from the context snippets."""
+    prompt = f"""You are a skilled researcher. You are able to pick the most relevant data from a very broad context to answer the user's query in a detailed and precise way. Write a complete, coherent, and fact-rich answer to the user's query from context snippets and discovered entities and write it in you "final" string in JSON format. Keep only unique and valuable information (guidance, facts, numbers, addresses, characteristics) related to the user's query. The user's query: "{query}".
+{entity_context}
+
+Rules: 1. Double check you don't repeat yourself and provide only unique and detailed information. 2. Answer in the "{prompt_lang}" language. 3. Stick closer to the language and style of provided context snippets. 4. Information discovered in "Discovered entities and their details" is the most reliable, and it is your final source of truth.
+
+Context snippets: {snippet_text}
+
+IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanatory text). Use this exact format:
+{{
+  "thinking": "Your internal analysis of the query and context here",
+  "final": "Your COMPLETE AND DETAILED answer to the user in {prompt_lang} language",
+  "sources": ["https://full-url-1.com", "https://full-url-2.com", "https://full-url-3.com"]
+}}
+
+Include up to 5 most relevant source URLs (complete URLs, not domains) from the context snippets."""
     
     logger.info(f"Together AI (generate_answer_from_serp) - Prompt: {prompt}")
     try:
@@ -853,12 +863,12 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
         raise
 
     logger.info(f"Together AI (generate_answer_from_serp) - Raw Response: {response_text}")
-
+    
     # Attempt to parse JSON response
     parsed_json = None
     final_answer_text = ""
     sources_from_json = []
-
+    
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -876,7 +886,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
                 logger.error(f"Together AI (generate_answer_from_serp) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (generate_answer_from_serp) - No JSON structure found in response")
-
+    
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -939,6 +949,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
 
     return final_answer
 
+
 @retry_on_server_error()
 async def generate_summary_from_chunks(query: str, snippets: list, lang: str, translator, entities_info: list) -> str:
     detected_user_lang = detect_language(query)
@@ -997,7 +1008,7 @@ Context snippets: {snippet_text}"""
                 {"role": "user", "content": query}
             ],
             temperature=0.2,
-            max_tokens=5000
+            max_tokens=9000
         )
         response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
@@ -1005,11 +1016,11 @@ Context snippets: {snippet_text}"""
         raise
 
     logger.info(f"Together AI (generate_summary_from_chunks) - Raw Response: {response_text}")
-
+    
     # Attempt to parse JSON response
     parsed_json = None
     final_answer_text = ""
-
+    
     try:
         # Try direct JSON parsing
         parsed_json = json.loads(response_text)
@@ -1027,7 +1038,7 @@ Context snippets: {snippet_text}"""
                 logger.error(f"Together AI (generate_summary_from_chunks) - Regex extraction found JSON-like structure but parsing failed")
         else:
             logger.error(f"Together AI (generate_summary_from_chunks) - No JSON structure found in response")
-
+    
     # Process JSON if successfully parsed
     if parsed_json:
         # Log full JSON response
@@ -1067,13 +1078,14 @@ Context snippets: {snippet_text}"""
 
     return final_answer_text
 
+
 @retry_on_server_error()
 async def polish_research_answer(summaries: str, query: str, lang: str, translator) -> str:
     """Takes a list of summaries and synthesizes the final answer, truncating if necessary."""
     # --- 1. Define constants and strip think tags ---
     summaries = strip_think(summaries)  # CRITICAL: Strip think tags first
-    MODEL_CONTEXT_WINDOW = 10000
-    MAX_OUTPUT_TOKENS = 5000
+    MODEL_CONTEXT_WINDOW = 16000
+    MAX_OUTPUT_TOKENS = 9000
     CHAR_PER_TOKEN_ESTIMATE = 3  # Conservative estimate
 
     # --- 2. Calculate available space for summaries ---
@@ -1209,6 +1221,7 @@ IMPORTANT: You MUST respond with ONLY a valid JSON object (no markdown code bloc
     logger.info(f"Together AI (polish-research) - Final answer received.")
     return polished_text
 
+
 @retry_on_server_error()
 async def summarize_research_chunk(chunk: str, query: str, lang: str) -> str:
     """Summarizes a single chunk of research data in the context of the user's query."""
@@ -1233,7 +1246,7 @@ Provide only the summary in the 'final' field, with no extra comments or introdu
         response = data = await chat_with_fallback(model=config.TOGETHER_DEEPSEEK, # Use the specified summarizer model
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2, # Factual summarization
-            max_tokens=4000 # Allow for a decent summary length, but not too long
+            max_tokens=8000 # Allow for a decent summary length, but not too long
         )
         response_text = data['choices'][0]['message']['content'].strip()
     except Exception as e:
