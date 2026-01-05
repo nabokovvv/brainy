@@ -194,7 +194,7 @@ def retry_on_server_error(retries=4, delay=2, backoff=2):
             for attempt in range(_retries):
                 try:
                     return await func(*args, **kwargs)
-                except (error.RateLimitError, error.ServiceUnavailableError, error.APIError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
+                except (error.RateLimitError, error.ServiceUnavailableError, error.APIError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError, httpx.HTTPStatusError) as e:
                     # If this was the last attempt, re-raise the exception
                     if attempt == _retries - 1:
                         logger.error(f"Final attempt failed for {func.__name__}. Raising error.", exc_info=True)
@@ -214,7 +214,7 @@ def retry_on_server_error(retries=4, delay=2, backoff=2):
                         # Also set the shared cooldown
                         async with _rate_limit_state["lock"]:
                             _rate_limit_state["until"] = asyncio.get_event_loop().time() + wait_time
-                      
+                       
                     logger.warning(log_message, exc_info=True)
                     await asyncio.sleep(wait_time)
 
