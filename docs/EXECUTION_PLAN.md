@@ -1,0 +1,271 @@
+# Brainy: пошаговый план и агентный workflow
+
+Статус аудита: 2026-07-10. Рабочее дерево на момент аудита было чистым; тестов, CI и `AGENTS.md` не было.
+
+## Исходное состояние
+
+Проект нельзя безопасно развивать поверх текущего runtime без нулевого этапа.
+
+Подтверждённые P0/P1 проблемы:
+
+- `ollama_client.py` не компилируется из-за некорректного f-string около строки 406.
+- README обещает Python 3.8+, но код использует синтаксис Python 3.10+.
+- local client несовместим с вызовами deep handlers и частично зависит от Together.
+- Один из Together Deep Research prompts не форматируется и отправляет модели буквальные `{query}`, `{lang}` и `{chunk}`; результат этого этапа нельзя считать grounded.
+- `config.py` требует Together, Yandex и Wikidata keys при import независимо от выбранного пути.
+- `requirements.txt` — dump окружения: отсутствуют прямые `py3langid`, `spacy`, `nltk`, но присутствует множество неиспользуемых транзитивных/GUI-пакетов.
+- `nltk` скачивает данные при import.
+- Reranker безусловно загружается при startup; Whisper тоже загружается при startup, но это проверенная владельцем ценная voice-возможность и не является кандидатом на удаление.
+- Запрос в очереди не фиксирует выбранный режим; worker читает изменяемый `chat_data` позже.
+- `PriorityQueue` не имеет монотонного sequence id для одинаковых приоритетов.
+- Поиск возвращает Yandex XML string, содержит hardcoded `folderId` и всегда использует EN localization.
+- Новый HTTP client создаётся на каждый search; connection pooling теряется.
+- Загрузка страниц использует `ssl=False`, не ограничивает redirect targets/content size и маскируется ротацией браузерных User-Agent; это MITM, SSRF и memory-exhaustion risk.
+- Yandex XML parser теряет mixed content внутри `<hlword>` из-за использования `.text` вместо `itertext()`.
+- В логи попадают полные запросы, ответы, SERP и содержимое страниц; приватные запросы и ответы также бессрочно экспортируются в `md/`.
+- `.env` не игнорируется, хотя README предлагает его использовать; tracked `config.py` одновременно указан в ignore.
+- Нет streaming: «Fast» показывает typing до полного ответа.
+- Состояние, очередь и настройки пользователей теряются при рестарте.
+
+Baseline-команда сейчас честно падает на syntax error:
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/brainy-pycache python3 -m py_compile *.py
+```
+
+## Как запускается работа
+
+Один пользовательский direction превращается orchestrator-агентом в вертикальные slices. На каждый slice создаются:
+
+1. scope и non-goals;
+2. acceptance criteria;
+3. reproducer/test или benchmark;
+4. отдельная ветка `codex/<issue>-<slug>`;
+5. implementation;
+6. независимый verification pass;
+7. атомарный commit;
+8. обновление этого плана.
+
+Максимум параллельно:
+
+- один orchestrator;
+- до двух implementers на непересекающихся файлах/интерфейсах;
+- один verifier/reviewer.
+
+Research и review могут идти параллельно в одном рабочем дереве read-only. Параллельные edits допускаются только в отдельных worktrees. Интеграция выполняется последовательно после green gates.
+
+## Stage 0 — Reproducible baseline
+
+Цель: чистая установка запускает local fast reply одной командой, обычные тесты не используют сеть.
+
+### Slice 0.1 — Toolchain и boot
+
+- Выбрать и зафиксировать Python >= 3.11.
+- Перейти от environment dump к `pyproject.toml` с прямыми runtime/dev dependencies и lockfile.
+- Исправить syntax/import failures.
+- Убрать import-time downloads и тяжёлые необязательные initializers, не удаляя Whisper.
+- Добавить `.env.example`, typed settings и условную startup validation.
+- Игнорировать `.env` и другие локальные secret-файлы; не полагаться на ignore для уже tracked config.
+- Полностью удалить chart generation и Markdown-экспорт приватных разговоров, их конфигурацию, output directories и неиспользуемые зависимости.
+- Исправить README до одного проверенного local quickstart.
+
+Gate:
+
+- fresh env устанавливается по документации;
+- `python -m compileall` green;
+- import smoke test green без ключей для выключенных providers;
+- `ruff check`, `ruff format --check`, `pytest -q` доступны одной командой каждый.
+
+Commit slices:
+
+1. `build: define reproducible python toolchain`
+2. `fix: make local configuration importable`
+3. `test: add boot and settings smoke tests`
+
+### Slice 0.2 — Provider contracts
+
+- Ввести `ChatRequest`, `ChatResult`, `ProviderModel`, `ProviderHealth` и `InferenceProvider` protocol.
+- Реализовать минимальный Ollama adapter на одном OpenAI-compatible endpoint.
+- Перенести prompts/use cases из provider transport.
+- Удалить прямую зависимость handlers от `llm_client.client` и provider-specific exceptions.
+
+Gate:
+
+- contract tests на fake Ollama HTTP;
+- fast reply работает без Together/NVIDIA/OpenRouter keys;
+- timeout, invalid JSON и unavailable Ollama дают bounded user error.
+
+### Slice 0.3 — Очередь и privacy
+
+- Request snapshot хранит query, route intent, language, request id и sequence id.
+- Добавить per-user fairness/cancellation policy и bounded queue.
+- Убрать plaintext user/content logs.
+- Включить TLS verification; удалить browser User-Agent rotation.
+- Разрешать только `http/https`; блокировать loopback/private/link-local targets после DNS и каждого redirect.
+- Ограничить content type, число redirect, response bytes, fetch concurrency и время обработки.
+- Удалить бессрочное сохранение prompts/responses/PNG и закрывать временные файлы.
+- Сохранить voice path: тестировать транскрибацию через fake Whisper и не регрессировать UX status/result messages.
+
+Gate:
+
+- два запроса одинакового priority не сравнивают Telegram objects;
+- смена режима после enqueue не меняет route уже принятого запроса;
+- concurrency/cancellation tests green;
+- log-capture test не находит prompt/response text;
+- fetch tests блокируют redirect на localhost, oversized/binary response и invalid scheme.
+
+### Slice 0.4 — CI
+
+- Добавить CI для Python syntax, Ruff и pytest.
+- В CI нет real provider keys и quota-consuming smoke tests.
+- Добавить dependency/security audit без автоматического destructive upgrade.
+
+Exit Stage 0:
+
+- local fast reply smoke green на чистом checkout;
+- все gates green;
+- ни один внешний ключ не обязателен для local path.
+- все существующие локали имеют одинаковый обязательный набор translation keys.
+
+## Stage 1 — One fast mode
+
+Цель: один понятный UX и доказанное преимущество скорости на Mac mini M4 16 GB.
+
+- Заменить четыре режима одним чатом и явным persistent-переключателем `Web OFF/ON`; никакого LLM/freshness preflight.
+- Подключить установленную Gemma 4 E2B как benchmark baseline и зафиксировать точный Ollama tag на Mac.
+- Поддержать динамический контекст до 64K; измерить 8K/32K/64K и не отправлять лишний контекст без необходимости.
+- Реализовать Telegram progressive delivery через Bot API 10.1 Rich Messages/streaming с fallback на обычные entities/HTML.
+- Использовать expandable quotes, structured citations, code/math formatting и уместные бесплатные message effects; не использовать paid broadcasts/Stars.
+- Убрать spaCy, Wikidata, chart generator и тяжёлый reranker из fast path; Whisper сохраняется как поддерживаемый voice path.
+- Зафиксировать точный установленный tag Gemma на Mac и использовать его как первый local benchmark candidate.
+- Добавить latency/source badge и feedback button.
+
+Gate:
+
+- минимум 50-question multilingual smoke/eval сохранён в репозитории без персональных данных;
+- local TTFT/complete/RSS/swap измерены по мягким ориентирам из `PRODUCT_STRATEGY.md`, включая warm-process сценарий с загруженным Whisper;
+- 3 concurrent-user benchmark не приводит к swap или starvation;
+- UI tests проверяют Markdown, long-message split и Telegram edit limits.
+
+Recommended commits:
+
+1. `refactor: replace mode menu with route intent`
+2. `feat: stream bounded local answers and preserve voice input`
+3. `test: add m4 latency and quality eval harness`
+
+## Stage 2 — Smart web
+
+Цель: предсказуемый Web ON path со ссылками и нулевыми денежными расходами.
+
+### Search contract
+
+- Ввести `SearchProvider` и нормализованный `SearchResult`.
+- Shared async client, timeouts, retry только для transient errors, circuit breaker и cache.
+- URL canonicalization/dedup до загрузки страниц.
+- Язык и запрошенные пользователем search filters передаются каждому backend.
+- Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.
+
+### Backends
+
+- Бесплатный DuckDuckGo-compatible HTTP/Python provider как первый best-effort backend.
+- Yandex fallback только при гарантированном отсутствии списаний, с configurable folder id и без XML leakage за пределы adapter.
+- Любой provider с риском платного запроса выключен на уровне policy/config.
+
+### Answer path
+
+- Web path запускается только при явном `Web ON`; состояние фиксируется в request snapshot.
+- Web synthesis использует 2–3 источника и привязывает ссылки к утверждениям.
+- Источники назначаются кодом только из реально использованных result/chunk IDs; URL, придуманный моделью, отбрасывается.
+- Web content явно помечается как недоверенные данные, команды внутри страниц не исполняются как prompt instructions.
+- «Подробнее»: до 2 параллельных подзапросов, 4 страниц, общий deadline 30 секунд.
+- При падении поиска bot явно сообщает, что свежесть не проверена; не выдаёт local answer как актуальный.
+
+Gate:
+
+- общий contract suite проходит для DuckDuckGo-compatible/Yandex fixtures;
+- основной free search failure -> разрешённый zero-cost fallback;
+- все providers fail -> bounded transparent response;
+- citation support >= 90%, stale-answer rate < 2%;
+- prompt-injection fixture не меняет system rules и не добавляет неподтверждённые ссылки;
+- latency записывается и сравнивается с мягкими ориентирами, не блокируя раннюю закрытую beta без явной регрессии.
+
+## Stage 3 — NVIDIA и OpenRouter catalog
+
+Цель: внешние бесплатные/квотные модели повышают доступность, не управляют продуктом.
+
+Общая policy: только модели/endpoint с фактической ценой 0; никакого автоматического перехода на платный вариант. Quota exhausted означает local fallback/fail closed.
+
+### NVIDIA adapter
+
+- Base URL `https://integrate.api.nvidia.com/v1`, общий OpenAI-compatible contract.
+- Curated allowlist, shared client, streaming, concurrency 1 по умолчанию (максимум 2 после измерений).
+- Retry `429/502/503/504` и connect timeout с full jitter/`Retry-After`; auth/validation errors не retry.
+- Локальные RPM/daily budgets и метрики, потому что стабильный machine-readable remaining-credit endpoint не подтверждён.
+
+### OpenRouter catalog/scanner
+
+- `GET /api/v1/models`, shortlist details и persistent last-known-good snapshot.
+- TTL 15 минут, stale-if-error 24 часа, single-flight refresh с jitter.
+- Eligibility по `:free`, price/capability/context/output/expiration policy.
+- Canary проверяет короткую мультиязычную выборку, latency и заявленные JSON/tools capabilities.
+- Active set — 2–3 curated models; `openrouter/free` — последний fallback.
+- Учитывать free limits и вести собственный UTC daily counter.
+
+Gate:
+
+- schema drift или пустой catalog не уничтожает LKG;
+- новая модель не становится active без canary/eval;
+- 429/quota exhaustion не создаёт retry storm;
+- route закреплён на запрос; fallback chain имеет общий time budget;
+- provider/model latency, errors, usage и quarantine видимы в admin diagnostics.
+
+## Stage 4 — Closed beta hardening
+
+Цель: безопасная beta на 20–50 пользователей.
+
+- SQLite для user settings, короткого context и durable jobs; миграции и backup policy.
+- Graceful shutdown/restart, healthcheck и launchd service на Mac mini.
+- Rate limiting per user, abuse bounds, queue backpressure.
+- Structured metrics и alerts без пользовательского текста.
+- Nightly quota-limited real smoke: один короткий запрос на включённый внешний provider, не на каждый commit.
+- Runbook для key rotation, exhausted quota, provider outage и rollback.
+
+Exit beta:
+
+- successful responses ориентировочно >= 95%;
+- ошибки и fallback rate наблюдаемы и не показывают устойчивой деградации;
+- минимум две недели telemetry без plaintext data;
+- подтверждённый спрос на «Подробнее» до обсуждения возврата Deep Research.
+
+## Правила продуктовых решений агентами
+
+Агенты могут самостоятельно:
+
+- выбирать implementation details в пределах утверждённой стратегии;
+- удалять dead code и объединять старые mode paths после characterization tests;
+- менять модель-кандидат по результату reproducible eval;
+- предлагать новый slice с ожидаемым влиянием на SLO.
+
+Новый продуктовый scope оформляется коротким ADR:
+
+```text
+Context -> Options -> Decision -> Evidence -> Reversal plan
+```
+
+Если решение обратимо и проходит текущие SLO, orchestrator может принять его. Расходы, публичный deploy, privacy changes и необратимые изменения требуют пользователя.
+
+## Шаблон отчёта каждого slice
+
+```text
+Outcome:
+Changed:
+Tests/benchmarks:
+Metrics before/after:
+Risks remaining:
+Commit:
+Next unblocked slice:
+```
+
+## Первый рекомендуемый запуск
+
+Начать только со Stage 0, slices 0.1 и 0.2. Не добавлять внешние search/inference providers или OpenRouter scanner, пока local fast path не компилируется, не тестируется и не запускается без лишних ключей. После этого Stage 1 даст измеримое подтверждение или опровержение главной гипотезы продукта — скорости.
