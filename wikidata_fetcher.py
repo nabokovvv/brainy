@@ -15,14 +15,14 @@ WIKIPEDIA_REST_API_BASE = "https://{lang}.wikipedia.org/api/rest_v1/page/summary
 QID_PATTERN = re.compile(r"^Q[1-9]\d*$")
 LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$")
 
+
 async def _execute_sparql_query(client: httpx.AsyncClient, query: str) -> dict | None:
     """Helper function to execute SPARQL queries against Wikidata asynchronously."""
-    headers = {
-        'User-Agent': config.CUSTOM_USER_AGENT,
-        'Accept': 'application/sparql-results+json'
-    }
+    headers = {"User-Agent": config.CUSTOM_USER_AGENT, "Accept": "application/sparql-results+json"}
     try:
-        response = await client.get(WIKIDATA_SPARQL_ENDPOINT, headers=headers, params={'query': query})
+        response = await client.get(
+            WIKIDATA_SPARQL_ENDPOINT, headers=headers, params={"query": query}
+        )
         response.raise_for_status()
         return response.json()
     except httpx.RequestError as exc:
@@ -31,6 +31,7 @@ async def _execute_sparql_query(client: httpx.AsyncClient, query: str) -> dict |
     except json.JSONDecodeError:
         logger.warning("Wikidata returned invalid JSON")
         return None
+
 
 async def get_wikidata_description(client: httpx.AsyncClient, qid: str, lang: str) -> str | None:
     """Fetches the description for a given Q-ID from Wikidata in a specific language."""
@@ -43,31 +44,34 @@ async def get_wikidata_description(client: httpx.AsyncClient, qid: str, lang: st
 
     data = await _execute_sparql_query(client, query)
     if data:
-        bindings = data.get('results', {}).get('bindings', [])
+        bindings = data.get("results", {}).get("bindings", [])
         if bindings:
-            description = bindings[0].get('desc', {}).get('value')
+            description = bindings[0].get("desc", {}).get("value")
             if description:
                 logger.info("Wikidata description found qid=%s language=%s", qid, lang)
                 return description
     logger.debug("No Wikidata description qid=%s language=%s", qid, lang)
     return None
 
-async def get_wikipedia_lead_paragraph(client: httpx.AsyncClient, qid: str, lang: str) -> str | None:
+
+async def get_wikipedia_lead_paragraph(
+    client: httpx.AsyncClient, qid: str, lang: str
+) -> str | None:
     """Fetches the lead paragraph for a given Q-ID from Wikipedia, with English fallback."""
     if not QID_PATTERN.fullmatch(qid) or not LANGUAGE_PATTERN.fullmatch(lang):
         return None
 
     async def fetch_title(target_lang: str):
-        title_query = f'''SELECT ?articleTitle WHERE {{
+        title_query = f"""SELECT ?articleTitle WHERE {{
           ?article schema:about wd:{qid} ;
                    schema:isPartOf <https://{target_lang}.wikipedia.org/> ;
                    schema:name ?articleTitle .
-        }} LIMIT 1'''
+        }} LIMIT 1"""
         title_data = await _execute_sparql_query(client, title_query)
         if title_data:
-            bindings = title_data.get('results', {}).get('bindings', [])
+            bindings = title_data.get("results", {}).get("bindings", [])
             if bindings:
-                return bindings[0].get('articleTitle', {}).get('value')
+                return bindings[0].get("articleTitle", {}).get("value")
         return None
 
     page_title = await fetch_title(lang)
@@ -75,20 +79,20 @@ async def get_wikipedia_lead_paragraph(client: httpx.AsyncClient, qid: str, lang
 
     if not page_title:
         logger.debug("Wikipedia title missing qid=%s language=%s", qid, lang)
-        page_title = await fetch_title('en')
-        api_lang = 'en'
+        page_title = await fetch_title("en")
+        api_lang = "en"
 
     if not page_title:
         logger.debug("Wikipedia title missing after fallback qid=%s", qid)
         return None
 
     url = WIKIPEDIA_REST_API_BASE.format(lang=api_lang, title=quote(page_title, safe=""))
-    headers = {'User-Agent': config.CUSTOM_USER_AGENT}
+    headers = {"User-Agent": config.CUSTOM_USER_AGENT}
     try:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
-        extract = data.get('extract')
+        extract = data.get("extract")
         if extract:
             logger.info("Wikipedia summary found qid=%s language=%s", qid, api_lang)
             return extract

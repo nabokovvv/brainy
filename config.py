@@ -65,9 +65,9 @@ class Settings:
         return cls(
             telegram_token=_optional_env(source.get("TELEGRAM_TOKEN")),
             llm_client=source.get("LLM_CLIENT", "ollama").strip().lower(),
-            ollama_base_url=source.get(
-                "OLLAMA_BASE_URL", "http://localhost:11434/v1"
-            ).strip().rstrip("/"),
+            ollama_base_url=source.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+            .strip()
+            .rstrip("/"),
             # Owner-provided provisional name; confirm the exact Ollama tag on the target Mac.
             ollama_model=source.get(
                 "OLLAMA_MODEL", source.get("FAST_REPLY_MODEL", "gemma4:e2b")

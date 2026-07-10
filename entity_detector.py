@@ -21,17 +21,18 @@ LANG_MODEL_MAP = {
     "fr": "fr_core_news_sm",
     "ru": "ru_core_news_sm",
     "de": "de_core_news_sm",
-    "tr": "xx_ent_wiki_sm", # No dedicated small model for Turkish
-    "id": "xx_ent_wiki_sm", # No dedicated small model for Indonesian
+    "tr": "xx_ent_wiki_sm",  # No dedicated small model for Turkish
+    "id": "xx_ent_wiki_sm",  # No dedicated small model for Indonesian
 }
 
 # Cache loaded NLP models
 _nlp_models = {}
 _model_load_lock = threading.Lock()
 
+
 def load_nlp_model(lang: str):
     """Loads and caches the spaCy NLP model for the given language."""
-    model_name = LANG_MODEL_MAP.get(lang, "xx_ent_wiki_sm") # Fallback to multilingual
+    model_name = LANG_MODEL_MAP.get(lang, "xx_ent_wiki_sm")  # Fallback to multilingual
 
     if model_name not in _nlp_models:
         with _model_load_lock:
@@ -43,9 +44,11 @@ def load_nlp_model(lang: str):
                     raise RuntimeError(f"spaCy model is not installed: {model_name}") from None
     return _nlp_models[model_name]
 
+
 def _clean_entity_text(text: str) -> str:
     """Removes leading conjunctions from the detected entity text."""
     return LEADING_CONJUNCTION_REGEX.sub("", text).strip()
+
 
 def detect_entities(text: str, lang: str) -> list:
     """
@@ -66,21 +69,21 @@ def detect_entities(text: str, lang: str) -> list:
         # Re-process the cleaned text to get the correct lemma
         cleaned_doc = nlp_specific(cleaned_text)
         lemmatized_parts = [
-            token.lemma_
-            for token in cleaned_doc
-            if token.pos_ in ['NOUN', 'PROPN', 'ADJ']
+            token.lemma_ for token in cleaned_doc if token.pos_ in ["NOUN", "PROPN", "ADJ"]
         ]
         lemmatized_entity_text = " ".join(lemmatized_parts).strip()
 
         if lemmatized_entity_text and lemmatized_entity_text not in found_entity_texts:
             # Use the original label but the cleaned text and lemma
-            entities.append({"text": cleaned_text, "label": ent.label_, "lemma": lemmatized_entity_text})
+            entities.append(
+                {"text": cleaned_text, "label": ent.label_, "lemma": lemmatized_entity_text}
+            )
             found_entity_texts.add(lemmatized_entity_text)
 
     # --- Second Pass: Multilingual Model for Fallback ---
     specific_model_name = LANG_MODEL_MAP.get(lang, "xx_ent_wiki_sm")
     if specific_model_name != "xx_ent_wiki_sm":
-        nlp_multi = load_nlp_model('xx') # 'xx' will load 'xx_ent_wiki_sm'
+        nlp_multi = load_nlp_model("xx")  # 'xx' will load 'xx_ent_wiki_sm'
         doc_multi = nlp_multi(text)
         for ent in doc_multi.ents:
             cleaned_text = _clean_entity_text(ent.text)
@@ -88,17 +91,27 @@ def detect_entities(text: str, lang: str) -> list:
                 continue
 
             # Attempt to lemmatize the multilingual entity for better deduplication
-            multi_lemmatized_text = " ".join([token.lemma_ for token in nlp_multi(cleaned_text) if token.pos_ in ['NOUN', 'PROPN', 'ADJ']]).strip()
-            if not multi_lemmatized_text: # Fallback if lemmatization fails
+            multi_lemmatized_text = " ".join(
+                [
+                    token.lemma_
+                    for token in nlp_multi(cleaned_text)
+                    if token.pos_ in ["NOUN", "PROPN", "ADJ"]
+                ]
+            ).strip()
+            if not multi_lemmatized_text:  # Fallback if lemmatization fails
                 multi_lemmatized_text = cleaned_text
 
-            if cleaned_text and multi_lemmatized_text.lower() not in {e.lower() for e in found_entity_texts}:
+            if cleaned_text and multi_lemmatized_text.lower() not in {
+                e.lower() for e in found_entity_texts
+            }:
                 is_new = True
                 for found_lemma in found_entity_texts:
                     if multi_lemmatized_text in found_lemma or found_lemma in multi_lemmatized_text:
                         is_new = False
                         break
                 if is_new:
-                    entities.append({"text": cleaned_text, "label": ent.label_, "lemma": multi_lemmatized_text})
+                    entities.append(
+                        {"text": cleaned_text, "label": ent.label_, "lemma": multi_lemmatized_text}
+                    )
                     found_entity_texts.add(multi_lemmatized_text)
     return entities

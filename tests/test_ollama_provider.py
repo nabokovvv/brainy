@@ -169,8 +169,7 @@ class OllamaProviderTests(unittest.IsolatedAsyncioTestCase):
         first = asyncio.create_task(provider.chat(_request_with_private_text()))
         await first_started.wait()
         others = [
-            asyncio.create_task(provider.chat(_request_with_private_text()))
-            for _ in range(2)
+            asyncio.create_task(provider.chat(_request_with_private_text())) for _ in range(2)
         ]
         await asyncio.sleep(0.01)
 

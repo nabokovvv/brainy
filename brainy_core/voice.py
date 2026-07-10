@@ -9,8 +9,7 @@ from typing import Any, Callable, Protocol
 
 
 class WhisperModel(Protocol):
-    def transcribe(self, audio_path: str, **options: Any) -> dict[str, Any]:
-        ...
+    def transcribe(self, audio_path: str, **options: Any) -> dict[str, Any]: ...
 
 
 class WhisperTranscriptionError(RuntimeError):

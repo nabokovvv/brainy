@@ -15,15 +15,18 @@ logger = logging.getLogger(__name__)
 # This helps prevent "429 Too Many Requests" errors.
 WIKIDATA_SEMAPHORE = asyncio.Semaphore(3)
 
-async def _process_single_entity(client, search_term: str, lang: str, spacy_label: str = None) -> Dict[str, Any]:
+
+async def _process_single_entity(
+    client, search_term: str, lang: str, spacy_label: str = None
+) -> Dict[str, Any]:
     """Processes a single entity, trying user's lang first, then falling back to English."""
     async with WIKIDATA_SEMAPHORE:
         # Try to find the entity in the user's language first
         qid = await get_qid_from_entity(client, search_term, lang, spacy_label=spacy_label)
 
         # If not found and the user's language is not English, try English as a fallback
-        if not qid and lang != 'en':
-            qid = await get_qid_from_entity(client, search_term, 'en', spacy_label=spacy_label)
+        if not qid and lang != "en":
+            qid = await get_qid_from_entity(client, search_term, "en", spacy_label=spacy_label)
 
         if qid:
             description = await get_wikidata_description(client, qid, lang)
@@ -32,10 +35,11 @@ async def _process_single_entity(client, search_term: str, lang: str, spacy_labe
                 "entity": search_term,
                 "description": description,
                 "qid": qid,
-                "wikipedia_url": None, # This function does not return a URL
+                "wikipedia_url": None,  # This function does not return a URL
                 "lead_paragraph": lead_paragraph,
             }
     return None
+
 
 async def get_entity_info(query: str, lang: str) -> List[Dict]:
     """
@@ -61,13 +65,15 @@ async def get_entity_info(query: str, lang: str) -> List[Dict]:
         # Each entity is now a dict with 'text', 'label', and 'lemma' keys
         unique_entities = {}
         for ent in detected_entities:
-            if ent['text'] not in unique_entities:
-                unique_entities[ent['text']] = ent['label']
-        
+            if ent["text"] not in unique_entities:
+                unique_entities[ent["text"]] = ent["label"]
+
         # Process entities with their labels for better disambiguation
-        tasks = [_process_single_entity(client, text, lang, spacy_label=label) 
-                 for text, label in unique_entities.items()]
+        tasks = [
+            _process_single_entity(client, text, lang, spacy_label=label)
+            for text, label in unique_entities.items()
+        ]
         results = await asyncio.gather(*tasks)
-    
+
     # Filter out None results for entities that were not found in Wikidata
     return [info for info in results if info is not None]

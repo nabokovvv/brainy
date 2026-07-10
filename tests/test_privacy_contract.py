@@ -60,12 +60,8 @@ class PrivacyContractTests(unittest.TestCase):
         forbidden_config_symbols = {"MD_OUTPUT_DIR", "CHARTS_OUTPUT_DIR"}
 
         self.assertFalse((ROOT / "chart_generator.py").exists())
-        self.assertFalse(
-            [symbol for symbol in forbidden_runtime_symbols if symbol in runtime_text]
-        )
-        self.assertFalse(
-            [symbol for symbol in forbidden_config_symbols if symbol in config_text]
-        )
+        self.assertFalse([symbol for symbol in forbidden_runtime_symbols if symbol in runtime_text])
+        self.assertFalse([symbol for symbol in forbidden_config_symbols if symbol in config_text])
 
     def test_generated_private_content_directories_do_not_exist_in_checkout(self) -> None:
         self.assertFalse((ROOT / "md").exists())

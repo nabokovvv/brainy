@@ -132,8 +132,7 @@ class OllamaProvider:
         payload: Dict[str, Any] = {
             "model": self._model.name,
             "messages": [
-                {"role": message.role, "content": message.content}
-                for message in request.messages
+                {"role": message.role, "content": message.content} for message in request.messages
             ],
             "max_tokens": request.max_output_tokens,
             "temperature": request.temperature,

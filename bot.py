@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import io
 import logging
 import re
-import asyncio
+import tempfile
 from collections import namedtuple
+from urllib.parse import unquote
+
+import telegram.error
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InputFile
+from telegram.constants import ChatAction, ParseMode
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -15,14 +23,14 @@ from telegram.ext import (
     Job,
     JobQueue,
 )
-from telegram.constants import ChatAction, ParseMode
-from telegram.error import BadRequest
-import telegram.error
 
 import config
-
-import io
-from telegram import InputFile
+from brainy_core import ProviderError, build_fast_chat_request
+from brainy_core.providers import OllamaProvider
+from brainy_core.scheduling import StablePriorityQueue
+from brainy_core.voice import WhisperTranscriber
+from localization import Translator
+from utils import strip_think
 
 # ---------------------------------------------------------------------------#
 #                                 Logging                                    #
@@ -33,18 +41,6 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
-logger.info("Using local Ollama provider")
-
-from localization import Translator
-from utils import strip_think
-from brainy_core import ProviderError, build_fast_chat_request
-from brainy_core.providers import OllamaProvider
-from brainy_core.scheduling import StablePriorityQueue
-from brainy_core.voice import WhisperTranscriber
-
-import tempfile
-from urllib.parse import unquote
 
 # ---------------------------------------------------------------------------#
 #                           Language Detection                               #
@@ -73,53 +69,78 @@ Request = namedtuple(
 # Markdown V2 Escaping (final)
 # ---------------------------------------------------------------------------#
 
-_SPECIAL       = re.compile(r'([\\_\[\]\(\)~>#+\-=|{}\.!])')          # что экранируем всегда
-_SINGLE_STAR   = re.compile(r'(?<!\*)\*(?!\*)')                        # одиночная *
-_LIST_MARKER   = re.compile(r'^( *)([-+*])(\s+)', re.MULTILINE)        # "- ", "+ ", "* "
-_QUOTE_MARKER  = re.compile(r'^( *)(>+)(\s+)',   re.MULTILINE)        # "> ", ">> ", …
-_NUMERIC_MARK  = re.compile(r'^( *\d+)(\.)(\s+)', re.MULTILINE)        # "1. "
-_CODE_SPLIT    = re.compile(r'(```.*?```|`[^`]*`)', re.S)              # тройной/инлайн код
-_HEADING_LINE  = re.compile(r'^(?:\s*#+\s*)+(?P<txt>\S[^\n]*)\s*$', re.MULTILINE)
-_URL_IN_PARENS = re.compile(r'\((https?://[^)\s]+)\)')
-_UNINDENT = re.compile(r'(?m)^(?![ \t]*(?:[-+*]|\d+\.|>))\s{2,}(?=\S)')
-_UNINDENT_MARKERS = re.compile(r'(?m)^[ \t]+(?=(?:[-+*]\s|\d+\\\.\s|>))')
+_SPECIAL = re.compile(r"([\\_\[\]\(\)~>#+\-=|{}\.!])")  # что экранируем всегда
+_SINGLE_STAR = re.compile(r"(?<!\*)\*(?!\*)")  # одиночная *
+_LIST_MARKER = re.compile(r"^( *)([-+*])(\s+)", re.MULTILINE)  # "- ", "+ ", "* "
+_QUOTE_MARKER = re.compile(r"^( *)(>+)(\s+)", re.MULTILINE)  # "> ", ">> ", …
+_NUMERIC_MARK = re.compile(r"^( *\d+)(\.)(\s+)", re.MULTILINE)  # "1. "
+_CODE_SPLIT = re.compile(r"(```.*?```|`[^`]*`)", re.S)  # тройной/инлайн код
+_HEADING_LINE = re.compile(r"^(?:\s*#+\s*)+(?P<txt>\S[^\n]*)\s*$", re.MULTILINE)
+_URL_IN_PARENS = re.compile(r"\((https?://[^)\s]+)\)")
+_UNINDENT = re.compile(r"(?m)^(?![ \t]*(?:[-+*]|\d+\.|>))\s{2,}(?=\S)")
+_UNINDENT_MARKERS = re.compile(r"(?m)^[ \t]+(?=(?:[-+*]\s|\d+\\\.\s|>))")
 
 # жирный: **…** и *…* (не захватываем "* " маркер списка)
-_DBL_BOLD      = re.compile(r'(?<!\\)\*\*([^*\n]+?)\*\*')
-_BOLD_PAIR     = re.compile(r'(?<!\\)\*(?!\s)([^*\n]+?)\*')
+_DBL_BOLD = re.compile(r"(?<!\\)\*\*([^*\n]+?)\*\*")
+_BOLD_PAIR = re.compile(r"(?<!\\)\*(?!\s)([^*\n]+?)\*")
 
 # строки "1. https://..." (источники)
-_SOURCES_LINE  = re.compile(r'^\s*(\d+)\.\s+(https?://\S+)\s*$', re.M)
+_SOURCES_LINE = re.compile(r"^\s*(\d+)\.\s+(https?://\S+)\s*$", re.M)
 
 # плейсхолдеры
-PH_MINUS = '\uFFF1'; PH_PLUS = '\uFFF2'; PH_STAR = '\uFFF3'; PH_QUOTE = '\uFFF4'; PH_DOT = '\uFFF5'
-PH_BOPEN = '\uFFF6'; PH_BCLOSE = '\uFFF7'
-PH_LB = '\uFFCA'; PH_RB = '\uFFCB'; PH_LP = '\uFFCC'; PH_RP = '\uFFCD'  # [ ] ( ) в ссылках
+PH_MINUS = "\ufff1"
+PH_PLUS = "\ufff2"
+PH_STAR = "\ufff3"
+PH_QUOTE = "\ufff4"
+PH_DOT = "\ufff5"
+PH_BOPEN = "\ufff6"
+PH_BCLOSE = "\ufff7"
+PH_LB = "\uffca"
+PH_RB = "\uffcb"
+PH_LP = "\uffcc"
+PH_RP = "\uffcd"  # [ ] ( ) в ссылках
+
 
 def normalize(text: str) -> str:
-    if not text: return text
-    return (text.replace('\u00A0',' ').replace('\u202F',' ').replace('\u2009',' ')
-                .replace('\u2011','-'))
+    if not text:
+        return text
+    return (
+        text.replace("\u00a0", " ")
+        .replace("\u202f", " ")
+        .replace("\u2009", " ")
+        .replace("\u2011", "-")
+    )
+
 
 def _headings_to_bold(seg: str) -> str:
     seg = _HEADING_LINE.sub(lambda m: f"*{m.group('txt')}*\n\n", seg)
     # не даём накапливаться лишним переносам
-    return re.sub(r'\n{3,}', '\n\n', seg)
+    return re.sub(r"\n{3,}", "\n\n", seg)
 
-_BULLET_PH = {'-': PH_MINUS, '+': PH_PLUS, '*': PH_STAR}
+
+_BULLET_PH = {"-": PH_MINUS, "+": PH_PLUS, "*": PH_STAR}
+
 
 def _hide_markers(seg: str) -> str:
     def repl_list(m):
         return f"{m.group(1)}{_BULLET_PH[m.group(2)]}{m.group(3)}"
+
     seg = _LIST_MARKER.sub(repl_list, seg)
-    seg = _QUOTE_MARKER.sub(lambda m: f"{m.group(1)}{PH_QUOTE*len(m.group(2))}{m.group(3)}", seg)
+    seg = _QUOTE_MARKER.sub(lambda m: f"{m.group(1)}{PH_QUOTE * len(m.group(2))}{m.group(3)}", seg)
     seg = _NUMERIC_MARK.sub(lambda m: f"{m.group(1)}{PH_DOT}{m.group(3)}", seg)
     return seg
 
+
 def _restore_markers(seg: str) -> str:
     # точку в нумсписке возвращаем экранированной (1\. )
-    return (seg.replace(PH_MINUS,'-').replace(PH_PLUS,'+').replace(PH_STAR,'*')
-              .replace(PH_QUOTE,'>').replace(PH_DOT,'\\.'))
+    return (
+        seg.replace(PH_MINUS, "-")
+        .replace(PH_PLUS, "+")
+        .replace(PH_STAR, "*")
+        .replace(PH_QUOTE, ">")
+        .replace(PH_DOT, "\\.")
+    )
+
 
 def escape_markdown_v2(text: str) -> str:
     if not text:
@@ -132,9 +153,10 @@ def escape_markdown_v2(text: str) -> str:
         # источники "1. https://..." -> читаемая ссылка
         def _src_repl(m):
             url = m.group(2)
-            link_target = url.replace(')', r'\)').replace('(', r'\(')
+            link_target = url.replace(")", r"\)").replace("(", r"\(")
             link_text = unquote(url)
             return f"{PH_LB}{link_text}{PH_RB}{PH_LP}{link_target}{PH_RP}"
+
         seg = _SOURCES_LINE.sub(_src_repl, seg)
 
         seg = _headings_to_bold(seg)  # # Заголовки -> *жирный*
@@ -145,68 +167,77 @@ def escape_markdown_v2(text: str) -> str:
 
         # прячем маркеры, экранируем спецсимволы, возвращаем маркеры
         seg = _hide_markers(seg)
-        seg = _SPECIAL.sub(r'\\\1', seg)
-        seg = _SINGLE_STAR.sub(r'\\*', seg)
+        seg = _SPECIAL.sub(r"\\\1", seg)
+        seg = _SINGLE_STAR.sub(r"\\*", seg)
         seg = _restore_markers(seg)
-        
+
         # убрать ведущие пробелы перед маркерами списков/нумерации/цитат
-        seg = _UNINDENT_MARKERS.sub('', seg)
+        seg = _UNINDENT_MARKERS.sub("", seg)
 
         # ← вот это новенькое: убираем лишние отступы в начале строк, кроме настоящих маркеров
-        seg = _UNINDENT.sub('', seg)
+        seg = _UNINDENT.sub("", seg)
 
         # возвращаем жирный и синтаксис ссылок
-        seg = seg.replace(PH_BOPEN, '*').replace(PH_BCLOSE, '*')
-        seg = (seg.replace(PH_LB,'[').replace(PH_RB,']')
-                  .replace(PH_LP,'(').replace(PH_RP,')'))
-        
+        seg = seg.replace(PH_BOPEN, "*").replace(PH_BCLOSE, "*")
+        seg = seg.replace(PH_LB, "[").replace(PH_RB, "]").replace(PH_LP, "(").replace(PH_RP, ")")
+
         # гарантируем пустую строку ПЕРЕД строками-заголовками вида *...*\n\n
         # (если 0 или 1 перенос — делаем два; если уже два, не трогаем)
-        seg = re.sub(r'(?<!\n)\n?(\*[^*\n]+\*\n\n)', r'\n\n\1', seg)
+        seg = re.sub(r"(?<!\n)\n?(\*[^*\n]+\*\n\n)", r"\n\n\1", seg)
         # не даём накапливаться лишним переносам
-        seg = re.sub(r'\n{3,}', '\n\n', seg)
+        seg = re.sub(r"\n{3,}", "\n\n", seg)
 
         # снять экранирование внутри URL
         seg = _URL_IN_PARENS.sub(lambda m: f"({m.group(1).replace(r'', '')})", seg)
 
         # если маркеры цитаты/нумерации встретились не в начале строки — перенос
-        seg = re.sub(r'(?<!^)(?<![\n\r])((?:\d+\\\.|>))(?=\s)', r'\n\1', seg)
+        seg = re.sub(r"(?<!^)(?<![\n\r])((?:\d+\\\.|>))(?=\s)", r"\n\1", seg)
 
         parts[i] = seg
 
-    return ''.join(parts)
+    return "".join(parts)
+
+
 def get_language_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data['translator']
+    translator = context.application.bot_data["translator"]
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(translator.get_string("keep_language_button", lang), callback_data=f"{ACTION_SET_LANGUAGE}_{lang}"),
-                InlineKeyboardButton(translator.get_string("change_language_button", lang), callback_data=ACTION_SHOW_LANGUAGES),
+                InlineKeyboardButton(
+                    translator.get_string("keep_language_button", lang),
+                    callback_data=f"{ACTION_SET_LANGUAGE}_{lang}",
+                ),
+                InlineKeyboardButton(
+                    translator.get_string("change_language_button", lang),
+                    callback_data=ACTION_SHOW_LANGUAGES,
+                ),
             ]
         ]
     )
 
+
 def get_all_languages_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data['translator']
+    translator = context.application.bot_data["translator"]
     keyboard = [
         [InlineKeyboardButton(lang.upper(), callback_data=f"{ACTION_SET_LANGUAGE}_{lang}")]
         for lang in translator.supported_languages
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 # ---------------------------------------------------------------------------#
 #                               Commands                                     #
 # ---------------------------------------------------------------------------#
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    user_lang = context.chat_data.get('language')
-    translator = context.application.bot_data['translator']
+    user_lang = context.chat_data.get("language")
+    translator = context.application.bot_data["translator"]
 
     if not user_lang:
         detected_lang = update.effective_user.language_code
-        user_lang = detected_lang if detected_lang in translator.supported_languages else 'en'
-        context.chat_data['language'] = user_lang
-        
+        user_lang = detected_lang if detected_lang in translator.supported_languages else "en"
+        context.chat_data["language"] = user_lang
+
         text = translator.get_string("welcome_new_user", user_lang)
         keyboard = get_language_keyboard(context, user_lang)
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
@@ -216,6 +247,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             text=translator.get_string("mode_fast_reply", user_lang),
         )
 
+
 # ---------------------------------------------------------------------------#
 #                       Button Callback Handler                              #
 # ---------------------------------------------------------------------------#
@@ -223,10 +255,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
 
-    translator = context.application.bot_data['translator']
+    translator = context.application.bot_data["translator"]
     action = query.data
 
-    lang = context.chat_data.get('language', 'en')
+    lang = context.chat_data.get("language", "en")
 
     if action == ACTION_SHOW_LANGUAGES:
         text = translator.get_string("language_selection_prompt", lang)
@@ -234,13 +266,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     elif action.startswith(f"{ACTION_SET_LANGUAGE}_"):
         new_lang = action.replace(f"{ACTION_SET_LANGUAGE}_", "")
-        context.chat_data['language'] = new_lang
+        context.chat_data["language"] = new_lang
         text = translator.get_string("mode_fast_reply", new_lang)
         await query.edit_message_text(text=text)
 
     elif action in {"web", "deep_research", "fast_reply", "deep_search", "deepseek_r1"}:
         # Old inline keyboards may survive a deploy. Collapse them to the only live path.
         await query.edit_message_text(text=translator.get_string("mode_fast_reply", lang))
+
 
 # ---------------------------------------------------------------------------#
 #                         Request Handlers                                   #
@@ -253,37 +286,38 @@ async def send_typing_periodically(bot, chat_id):
                 await asyncio.sleep(8)  # Send typing action every 8 seconds
             except (telegram.error.TimedOut, telegram.error.NetworkError) as e:
                 logger.warning(f"Failed to send typing action due to network error: {e}")
-                await asyncio.sleep(15) # Wait longer before retrying
+                await asyncio.sleep(15)  # Wait longer before retrying
     except asyncio.CancelledError:
-        pass # Task was cancelled, expected behavior
+        pass  # Task was cancelled, expected behavior
+
 
 def _clean_text_for_plain_send(text: str) -> str:
     # Rule 1: Remove all backslashes and all asterisks, except for newlines.
-    cleaned_text = text.replace('\\', '').replace('*', '')
+    cleaned_text = text.replace("\\", "").replace("*", "")
 
     # Rule 2: Detect and remove ONLY URLs in (...) including "(",")" themselves.
     # Use the existing _URL_IN_PARENS regex.
-    cleaned_text = _URL_IN_PARENS.sub('', cleaned_text)
+    cleaned_text = _URL_IN_PARENS.sub("", cleaned_text)
 
     # Rule 3: If there is a line that equals "---" (ignoring whitespace) remove this line
-    lines = cleaned_text.split('\n')
-    filtered_lines = [line for line in lines if line.strip() != '---']
-    cleaned_text = '\n'.join(filtered_lines)
+    lines = cleaned_text.split("\n")
+    filtered_lines = [line for line in lines if line.strip() != "---"]
+    cleaned_text = "\n".join(filtered_lines)
 
     # Rule 4: Check for empty lines, no more than 2 empty lines (\n\n)
-    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
 
     return cleaned_text
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    if 'language' not in context.chat_data:
+    if "language" not in context.chat_data:
         await start(update, context)
         return
 
-    lang = context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
+    lang = context.chat_data.get("language", "en")
+    translator = context.application.bot_data["translator"]
 
     # Send an animated hourglass emoji as a status indicator
     status_message = await context.bot.send_message(chat_id, "⏳")
@@ -293,7 +327,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
             voice_file = await voice.get_file()
             await voice_file.download_to_drive(temp_audio_file.name)
-            
+
             whisper_transcriber = context.application.bot_data["whisper_transcriber"]
             transcribed_text = await whisper_transcriber.transcribe(
                 temp_audio_file.name,
@@ -327,9 +361,10 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             process_buffered_messages,
             when=0.8,  # 0.8-second delay (adjust as needed)
             chat_id=chat_id,
-            name=f"process-msg-{chat_id}"
+            name=f"process-msg-{chat_id}",
         )
         user_job_trackers[chat_id] = new_job
+
 
 async def fast_reply_handler(
     update: Update,
@@ -338,8 +373,8 @@ async def fast_reply_handler(
     *,
     language: str | None = None,
 ):
-    lang = language or context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
+    lang = language or context.chat_data.get("language", "en")
+    translator = context.application.bot_data["translator"]
     llm_semaphore = context.application.bot_data["llm_semaphore"]
 
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
@@ -356,9 +391,9 @@ async def fast_reply_handler(
                 result.model.name,
                 result.latency_ms,
             )
-        
+
         final_answer = re.sub(r"<think>.*?</think>", "", final_answer, flags=re.S | re.I).strip()
-        
+
         if not final_answer:
             await update.message.reply_text(translator.get_string("error_fast_reply_empty", lang))
             return
@@ -373,6 +408,7 @@ async def fast_reply_handler(
         logger.error("Fast reply failed type=%s", type(exc).__name__)
         await update.message.reply_text(translator.get_string("error_generic", lang))
 
+
 # ---------------------------------------------------------------------------#
 #                         Core Logic (Worker)                                #
 # ---------------------------------------------------------------------------#
@@ -386,13 +422,13 @@ async def _send_worker_error(update: Update, translator, key: str, lang: str) ->
 
 
 async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
-    translator = app_data['translator']
+    translator = app_data["translator"]
     while True:
         typing_task = None
         queue_item_acquired = False
         update = None
         context = None
-        lang = 'en'
+        lang = "en"
         try:
             priority, request = await queue.get()
             queue_item_acquired = True
@@ -448,6 +484,7 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
             if queue_item_acquired:
                 queue.task_done()
 
+
 # ---------------------------------------------------------------------------#
 #                         Message Handling (Gatekeeper)                       #
 # ---------------------------------------------------------------------------#
@@ -457,7 +494,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not message_text:
         return
 
-    if 'language' not in context.chat_data:
+    if "language" not in context.chat_data:
         await start(update, context)
         return
 
@@ -475,9 +512,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         process_buffered_messages,
         when=0.8,  # 0.8-second delay (adjust as needed)
         chat_id=chat_id,
-        name=f"process-msg-{chat_id}"
+        name=f"process-msg-{chat_id}",
     )
     user_job_trackers[chat_id] = new_job
+
 
 # ---------------------------------------------------------------------------#
 # Safe split & send for MarkdownV2 (final)
@@ -487,20 +525,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 _CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+\-]*)\n([\s\S]*?)\n```", re.M)
 _CODE_AS_FILE_THRESHOLD = 2000  # порог, когда код выносить во вложение
 
+
 def _guess_ext(lang: str) -> str:
     m = {
-        "py":"py","python":"py","js":"js","javascript":"js","ts":"ts","typescript":"ts",
-        "json":"json","bash":"sh","sh":"sh","shell":"sh","html":"html","css":"css",
-        "java":"java","c":"c","cpp":"cpp","c++":"cpp","go":"go","golang":"go",
-        "rs":"rs","rust":"rs","rb":"rb","ruby":"rb","php":"php","kt":"kt","kotlin":"kt",
-        "swift":"swift","sql":"sql","yaml":"yml","yml":"yml","md":"md","markdown":"md",
-        "txt":"txt","text":"txt","": "txt"
+        "py": "py",
+        "python": "py",
+        "js": "js",
+        "javascript": "js",
+        "ts": "ts",
+        "typescript": "ts",
+        "json": "json",
+        "bash": "sh",
+        "sh": "sh",
+        "shell": "sh",
+        "html": "html",
+        "css": "css",
+        "java": "java",
+        "c": "c",
+        "cpp": "cpp",
+        "c++": "cpp",
+        "go": "go",
+        "golang": "go",
+        "rs": "rs",
+        "rust": "rs",
+        "rb": "rb",
+        "ruby": "rb",
+        "php": "php",
+        "kt": "kt",
+        "kotlin": "kt",
+        "swift": "swift",
+        "sql": "sql",
+        "yaml": "yml",
+        "yml": "yml",
+        "md": "md",
+        "markdown": "md",
+        "txt": "txt",
+        "text": "txt",
+        "": "txt",
     }
     return m.get((lang or "").lower(), "txt")
 
+
 async def _extract_code_to_files(update, text: str) -> str:
     """
-    Находит большие ```lang\n...\n``` блоки, шлёт их как document, 
+    Находит большие ```lang\n...\n``` блоки, шлёт их как document,
     а в тексте оставляет плейсхолдер 'Код во вложении'.
     """
     out, pos, idx = [], 0, 1
@@ -508,16 +576,17 @@ async def _extract_code_to_files(update, text: str) -> str:
         lang, code = m.group(1), m.group(2)
         if len(code) < _CODE_AS_FILE_THRESHOLD:
             continue
-        out.append(text[pos:m.start()])              # кусок до кода
+        out.append(text[pos : m.start()])  # кусок до кода
         ext = _guess_ext(lang)
         bio = io.BytesIO(code.encode("utf-8"))
         bio.name = f"snippet_{idx}.{ext}"
         await update.message.reply_document(InputFile(bio))
-        out.append("👆📄📎\n")              # безопасный плейсхолдер
+        out.append("👆📄📎\n")  # безопасный плейсхолдер
         pos = m.end()
         idx += 1
     out.append(text[pos:])
     return "".join(out)
+
 
 async def send_long_message(update, text: str, **kwargs):
     """
@@ -531,37 +600,37 @@ async def send_long_message(update, text: str, **kwargs):
     MAX = 4096
     if text is None:
         text = ""
-    
+
     text = await _extract_code_to_files(update, text)
 
     # ---------- helpers: safe split ----------
-    _DBL_STAR_RE  = re.compile(r'(?<!\\)\*\*')   # неэкранированные **
-    _TRIPLE_RE    = re.compile(r'(?<!\\)```')    # неэкранированные ```
-    _BACKTICK_RE  = re.compile(r'(?<!\\)`')      # неэкранированные `
-    _CODE_SPLIT   = re.compile(r'(```.*?```|`[^`]*`)', re.S)
-    _LINK_RE    = re.compile(r'(\[[^\]]+\])\((https?://[^)\s]+)\)')  # [text](url)
+    _DBL_STAR_RE = re.compile(r"(?<!\\)\*\*")  # неэкранированные **
+    _TRIPLE_RE = re.compile(r"(?<!\\)```")  # неэкранированные ```
+    _BACKTICK_RE = re.compile(r"(?<!\\)`")  # неэкранированные `
+    _CODE_SPLIT = re.compile(r"(```.*?```|`[^`]*`)", re.S)
+    _LINK_RE = re.compile(r"(\[[^\]]+\])\((https?://[^)\s]+)\)")  # [text](url)
 
     def _is_safe_cut(s: str, idx: int) -> bool:
         if idx <= 0 or idx >= len(s):
             return True
-        if s[idx - 1] == '\\':                          # не после обратного слэша
+        if s[idx - 1] == "\\":  # не после обратного слэша
             return False
-        if s[idx - 1] == '*' and s[idx] == '*':         # не между '**'
+        if s[idx - 1] == "*" and s[idx] == "*":  # не между '**'
             return False
-        if s[idx - 1] == '`' and s[idx] == '`':         # не между '``'
+        if s[idx - 1] == "`" and s[idx] == "`":  # не между '``'
             return False
-        if len(_TRIPLE_RE.findall(s[:idx])) % 2 == 1:   # не внутри ``` … ```
+        if len(_TRIPLE_RE.findall(s[:idx])) % 2 == 1:  # не внутри ``` … ```
             return False
-        if len(_BACKTICK_RE.findall(s[:idx])) % 2 == 1: # не внутри ` … `
+        if len(_BACKTICK_RE.findall(s[:idx])) % 2 == 1:  # не внутри ` … `
             return False
-        if len(_DBL_STAR_RE.findall(s[:idx])) % 2 == 1: # не при незакрытом **
+        if len(_DBL_STAR_RE.findall(s[:idx])) % 2 == 1:  # не при незакрытом **
             return False
         return True
 
     def _find_safe_cut(s: str, limit: int) -> int:
         end = min(limit, len(s))
         # сначала ищем перевод строки или пробел
-        candidates = [s.rfind('\n', 0, end), s.rfind(' ', 0, end)]
+        candidates = [s.rfind("\n", 0, end), s.rfind(" ", 0, end)]
         cut = max([c for c in candidates if c != -1], default=end)
         probe = cut
         while probe > 0 and not _is_safe_cut(s, probe):
@@ -577,11 +646,11 @@ async def send_long_message(update, text: str, **kwargs):
         # экранировать последнюю не закрытую '**'
         if len(_DBL_STAR_RE.findall(chunk)) % 2 == 1:
             last = chunk.rfind("**")
-            if last != -1 and (last == 0 or chunk[last - 1] != '\\'):
-                chunk = chunk[:last] + r"\**" + chunk[last + 2:]
+            if last != -1 and (last == 0 or chunk[last - 1] != "\\"):
+                chunk = chunk[:last] + r"\**" + chunk[last + 2 :]
         # если заканчивается одиночным '\', удваиваем
-        if chunk.endswith('\\') and not chunk.endswith('\\\\'):
-            chunk += '\\'
+        if chunk.endswith("\\") and not chunk.endswith("\\\\"):
+            chunk += "\\"
         return chunk
 
     # --- NEW: маленькие помощники для границы чанка ---
@@ -591,8 +660,8 @@ async def send_long_message(update, text: str, **kwargs):
             j = len(left) - 1
             while j >= 0 and left[j].isdigit():
                 j -= 1
-            moved = left[j+1:]           # хвост цифр, например '10'
-            return left[:j+1], moved + right
+            moved = left[j + 1 :]  # хвост цифр, например '10'
+            return left[: j + 1], moved + right
         return left, right
 
     def _fix_boundary_inside_link(left: str, right: str) -> tuple[str, str]:
@@ -601,13 +670,13 @@ async def send_long_message(update, text: str, **kwargs):
         Если слева есть '[' без соответствующего ']' — переносим границу к этому '['.
         Если слева есть ']' и затем незакрытая '(' — переносим границу к ']'.
         """
-        lb = left.rfind('[')
-        rb = left.rfind(']')
+        lb = left.rfind("[")
+        rb = left.rfind("]")
         if lb > rb:  # внутри текста ссылки
             cut = lb
             return left[:cut], left[cut:] + right
-        lp = left.rfind('(')
-        rp = left.rfind(')')
+        lp = left.rfind("(")
+        rp = left.rfind(")")
         if rb != -1 and rb < lp > rp:  # внутри (url)
             cut = rb  # порежем перед '('
             return left[:cut], left[cut:] + right
@@ -616,52 +685,57 @@ async def send_long_message(update, text: str, **kwargs):
     # ---------- helpers: fallbacks ----------
     def _escape_hash_and_dot_outside_code(s: str) -> str:
         """Экранируем # и . вне кода и ВНЕ URL."""
-        PH_L = '\uF101'; PH_R = '\uF102'  # плейсхолдеры для ( )
+        PH_L = "\uf101"
+        PH_R = "\uf102"  # плейсхолдеры для ( )
         parts = _CODE_SPLIT.split(s)
         for i in range(0, len(parts), 2):
             seg = parts[i]
             # прячем ссылки: (url) -> PH_L url PH_R
             seg = _LINK_RE.sub(lambda m: f"{m.group(1)}{PH_L}{m.group(2)}{PH_R}", seg)
             # экранируем
-            seg = re.sub(r'(?<!\\)#', r'\#', seg)
-            seg = re.sub(r'(?<!\\)\.', r'\.', seg)
+            seg = re.sub(r"(?<!\\)#", r"\#", seg)
+            seg = re.sub(r"(?<!\\)\.", r"\.", seg)
             # возвращаем ссылки
-            seg = seg.replace(PH_L, '(').replace(PH_R, ')')
+            seg = seg.replace(PH_L, "(").replace(PH_R, ")")
             parts[i] = seg
-        return ''.join(parts)
-    
+        return "".join(parts)
+
     def _escape_parens_outside_code(s: str) -> str:
         """Экранируем круглые скобки вне кода и ВНЕ [текст](url)."""
-        PH_L = '\uF121'; PH_R = '\uF122'  # плейсхолдеры для ( )
+        PH_L = "\uf121"
+        PH_R = "\uf122"  # плейсхолдеры для ( )
         parts = _CODE_SPLIT.split(s)
         for i in range(0, len(parts), 2):
             seg = parts[i]
             # прячем ссылки: (url) -> PH_L url PH_R
             seg = _LINK_RE.sub(lambda m: f"{m.group(1)}{PH_L}{m.group(2)}{PH_R}", seg)
             # экранируем обычные скобки
-            seg = re.sub(r'(?<!\\)\(', r'\(', seg)
-            seg = re.sub(r'(?<!\\)\)', r'\)', seg)
+            seg = re.sub(r"(?<!\\)\(", r"\(", seg)
+            seg = re.sub(r"(?<!\\)\)", r"\)", seg)
             # возвращаем ссылки
-            seg = seg.replace(PH_L, '(').replace(PH_R, ')')
+            seg = seg.replace(PH_L, "(").replace(PH_R, ")")
             parts[i] = seg
-        return ''.join(parts)
+        return "".join(parts)
 
     def _escape_hyphens_outside_code(s: str) -> str:
         """Экранируем '-' вне кода и ВНЕ URL. Маркеры списков '- ' тоже экранируем."""
-        PH_L = '\uF111'; PH_R = '\uF112'
+        PH_L = "\uf111"
+        PH_R = "\uf112"
         parts = _CODE_SPLIT.split(s)
         for i in range(0, len(parts), 2):
             seg = parts[i]
             # прячем ссылки
             seg = _LINK_RE.sub(lambda m: f"{m.group(1)}{PH_L}{m.group(2)}{PH_R}", seg)
             # списочные маркеры "- " -> "\- "
-            seg = re.sub(r'^( *)(-)(\s+)', lambda m: f"{m.group(1)}\\-{m.group(3)}", seg, flags=re.M)
+            seg = re.sub(
+                r"^( *)(-)(\s+)", lambda m: f"{m.group(1)}\\-{m.group(3)}", seg, flags=re.M
+            )
             # остальные дефисы
-            seg = re.sub(r'(?<!\\)-', r'\-', seg)
+            seg = re.sub(r"(?<!\\)-", r"\-", seg)
             # возвращаем ссылки
-            seg = seg.replace(PH_L, '(').replace(PH_R, ')')
+            seg = seg.replace(PH_L, "(").replace(PH_R, ")")
             parts[i] = seg
-        return ''.join(parts)
+        return "".join(parts)
 
     # ---------- sending ----------
     if len(text) <= MAX:
@@ -675,18 +749,23 @@ async def send_long_message(update, text: str, **kwargs):
                 safer = _escape_hyphens_outside_code(safe)
                 try:
                     await update.message.reply_text(safer, **kwargs)
-                except BadRequest as e: # This is the innermost BadRequest
-                    logger.warning(f"Failed to send message with MarkdownV2 after all escapes. Sending as plain text. Error: {e}", exc_info=True)
+                except BadRequest as e:  # This is the innermost BadRequest
+                    logger.warning(
+                        f"Failed to send message with MarkdownV2 after all escapes. Sending as plain text. Error: {e}",
+                        exc_info=True,
+                    )
                     cleaned_final_text = _clean_text_for_plain_send(text)
                     # Send original text, remove parse_mode from kwargs
-                    plain_kwargs = {k: v for k, v in kwargs.items() if k != 'parse_mode'}
-                    await update.message.reply_text(cleaned_final_text, parse_mode=None, **plain_kwargs)
+                    plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+                    await update.message.reply_text(
+                        cleaned_final_text, parse_mode=None, **plain_kwargs
+                    )
         return
 
     rest = text
     # клавиатуру/inline-кнопки показываем только в последнем сообщении
-    common_kwargs = {k: v for k, v in kwargs.items() if k != 'reply_markup'}
-    last_kwargs   = kwargs
+    common_kwargs = {k: v for k, v in kwargs.items() if k != "reply_markup"}
+    last_kwargs = kwargs
 
     while rest:
         if len(rest) <= MAX:
@@ -725,15 +804,23 @@ async def send_long_message(update, text: str, **kwargs):
                         await update.message.reply_text(safer_chunk, **common_kwargs)
                     else:
                         await update.message.reply_text(safer_chunk, **last_kwargs)
-                except BadRequest as e: # This is the innermost BadRequest
-                    logger.warning(f"Failed to send chunk with MarkdownV2 after all escapes. Sending as plain text. Error: {e}", exc_info=True)
+                except BadRequest as e:  # This is the innermost BadRequest
+                    logger.warning(
+                        f"Failed to send chunk with MarkdownV2 after all escapes. Sending as plain text. Error: {e}",
+                        exc_info=True,
+                    )
                     cleaned_final_chunk = _clean_text_for_plain_send(chunk)
                     if rest:
-                        plain_kwargs = {k: v for k, v in common_kwargs.items() if k != 'parse_mode'}
-                        await update.message.reply_text(cleaned_final_chunk, parse_mode=None, **plain_kwargs)
+                        plain_kwargs = {k: v for k, v in common_kwargs.items() if k != "parse_mode"}
+                        await update.message.reply_text(
+                            cleaned_final_chunk, parse_mode=None, **plain_kwargs
+                        )
                     else:
-                        plain_kwargs = {k: v for k, v in last_kwargs.items() if k != 'parse_mode'}
-                        await update.message.reply_text(cleaned_final_chunk, parse_mode=None, **plain_kwargs)
+                        plain_kwargs = {k: v for k, v in last_kwargs.items() if k != "parse_mode"}
+                        await update.message.reply_text(
+                            cleaned_final_chunk, parse_mode=None, **plain_kwargs
+                        )
+
 
 async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Processes the buffered messages for a user after the timeout."""
@@ -748,18 +835,22 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.warning(f"process_buffered_messages called for chat {chat_id} with no data.")
         return
 
-    full_query_text = " ".join(buffered_messages) # Join messages with a space
-    language = context.chat_data.get('language', 'en')
+    full_query_text = " ".join(buffered_messages)  # Join messages with a space
+    language = context.chat_data.get("language", "en")
 
-    logger.info(f"Processing buffered messages for chat {chat_id}. Total messages: {len(buffered_messages)}, Combined length: {len(full_query_text)}.")
+    logger.info(
+        f"Processing buffered messages for chat {chat_id}. Total messages: {len(buffered_messages)}, Combined length: {len(full_query_text)}."
+    )
 
     MAX_MESSAGE_LENGTH = 12000
     if len(full_query_text) > MAX_MESSAGE_LENGTH:
-        translator = context.application.bot_data['translator']
+        translator = context.application.bot_data["translator"]
         await last_update.message.reply_text(
             translator.get_string("error_message_too_long", language)
         )
-        logger.warning(f"Buffered query for chat {chat_id} exceeded max length ({len(full_query_text)} > {MAX_MESSAGE_LENGTH}).")
+        logger.warning(
+            f"Buffered query for chat {chat_id} exceeded max length ({len(full_query_text)} > {MAX_MESSAGE_LENGTH})."
+        )
         return
 
     priority = 1
@@ -777,9 +868,11 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     logger.info("Buffered query submitted chat=%s priority=%s", chat_id, priority)
 
+
 # ---------------------------------------------------------------------------#
 #                                   Main                                     #
 # ---------------------------------------------------------------------------#
+
 
 async def _best_effort_cleanup(label: str, operation) -> None:
     try:
@@ -789,9 +882,11 @@ async def _best_effort_cleanup(label: str, operation) -> None:
     except Exception as exc:
         logger.error("Cleanup step %s failed type=%s", label, type(exc).__name__)
 
+
 async def main_async() -> None:
     config.SETTINGS.validate(require_telegram=True)
-    translator = Translator('translations.json')
+    logger.info("Using local Ollama provider")
+    translator = Translator("translations.json")
     request_queue = StablePriorityQueue(maxsize=100)
     llm_semaphore = asyncio.Semaphore(1)
     whisper_transcriber = WhisperTranscriber(config.WHISPER_MODEL)
@@ -827,7 +922,7 @@ async def main_async() -> None:
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
 
     workers = [
-        asyncio.create_task(worker(f"Worker-{i+1}", request_queue, application.bot_data))
+        asyncio.create_task(worker(f"Worker-{i + 1}", request_queue, application.bot_data))
         for i in range(worker_count)
     ]
 
@@ -875,11 +970,13 @@ async def main_async() -> None:
             await _best_effort_cleanup("application.shutdown", application.shutdown)
         logger.info("Bot has been shut down.")
 
+
 def main() -> None:
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("Program interrupted by user.")
+
 
 if __name__ == "__main__":
     main()

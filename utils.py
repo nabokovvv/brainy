@@ -50,8 +50,9 @@ TRANSLATIONS = {
         "Websites Visited:": "Situs Web yang Dikunjungi:",
         "Chunks Analyzed:": "Potongan yang Dianalisis:",
         "Total Characters Read:": "Total Karakter yang Dibaca:",
-    }
+    },
 }
+
 
 def translate_string(text_key: str, lang: str) -> str:
     """
@@ -59,6 +60,7 @@ def translate_string(text_key: str, lang: str) -> str:
     Falls back to English if the language or key is not found.
     """
     return TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(text_key, text_key)
+
 
 # Допустимые имена "мысленных" тегов
 _THINK_TAGS = r"(think|analysis|reasoning|scratchpad|chain[_\-\s]?of[_\-\s]?thought)"
@@ -80,6 +82,7 @@ _THINK_OPEN = re.compile(
     rf"<\s*{_THINK_TAGS}\b[^>]*>",
     re.IGNORECASE,
 )
+
 
 def strip_think(text: str) -> str:
     if not isinstance(text, str):

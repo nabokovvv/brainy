@@ -59,9 +59,7 @@ async def _host_resolves_only_to_public_addresses(url: str) -> bool:
         )
     except OSError:
         return False
-    return bool(addresses) and all(
-        is_global_ip_address(sockaddr[0]) for *_, sockaddr in addresses
-    )
+    return bool(addresses) and all(is_global_ip_address(sockaddr[0]) for *_, sockaddr in addresses)
 
 
 async def fetch_page(session, url: str, retries: int = 2):
@@ -81,7 +79,7 @@ async def fetch_page(session, url: str, retries: int = 2):
                 allow_redirects=False,
             ) as response:
                 if response.status in {429, 503} and attempt < retries - 1:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                     continue
                 if response.status != 200:
                     logger.warning("Fetch failed host=%s status=%s", host, response.status)
@@ -105,28 +103,32 @@ async def fetch_page(session, url: str, retries: int = 2):
 def clean_html(html_content, url):
     host = urlparse(url).hostname or "unknown"
     try:
-        soup = BeautifulSoup(html_content, 'html.parser')
+        soup = BeautifulSoup(html_content, "html.parser")
         for script_or_style in soup(["script", "style"]):
             script_or_style.decompose()
-        
-        title = soup.title.string if soup.title and soup.title.string else ''
+
+        title = soup.title.string if soup.title and soup.title.string else ""
         if not title:
             logger.debug("No title found host=%s", host)
 
-        meta_description_tag = soup.find('meta', attrs={'name': 'description'})
-        meta_description = meta_description_tag['content'] if meta_description_tag and 'content' in meta_description_tag.attrs else ''
+        meta_description_tag = soup.find("meta", attrs={"name": "description"})
+        meta_description = (
+            meta_description_tag["content"]
+            if meta_description_tag and "content" in meta_description_tag.attrs
+            else ""
+        )
         if not meta_description:
             logger.debug("No meta description found host=%s", host)
 
-        paragraphs = soup.find_all('p')
-        list_items = soup.find_all('li')
-        tables = soup.find_all('table')
+        paragraphs = soup.find_all("p")
+        list_items = soup.find_all("li")
+        tables = soup.find_all("table")
 
-        p_text = ' '.join(p.get_text() for p in paragraphs) if paragraphs else ''
-        li_text = '\n'.join(li.get_text() for li in list_items) if list_items else ''
-        table_text = '\n'.join(table.get_text() for table in tables) if tables else ''
+        p_text = " ".join(p.get_text() for p in paragraphs) if paragraphs else ""
+        li_text = "\n".join(li.get_text() for li in list_items) if list_items else ""
+        table_text = "\n".join(table.get_text() for table in tables) if tables else ""
 
-        combined_body_text = '\n\n'.join(filter(None, [p_text, li_text, table_text]))
+        combined_body_text = "\n\n".join(filter(None, [p_text, li_text, table_text]))
 
         if not combined_body_text:
             logger.debug("No main body text found host=%s", host)
@@ -155,13 +157,23 @@ def chunk_text(text, source_url, max_chunk_words=150):
             current_chunk_word_count += len(sentence_words)
         else:
             if current_chunk_sentences:
-                chunks.append(TextChunk(text=' '.join(current_chunk_sentences), source_url=source_url, index=len(chunks)))
+                chunks.append(
+                    TextChunk(
+                        text=" ".join(current_chunk_sentences),
+                        source_url=source_url,
+                        index=len(chunks),
+                    )
+                )
             current_chunk_sentences = [sentence]
             current_chunk_word_count = len(sentence_words)
-    
+
     if current_chunk_sentences:
-        chunks.append(TextChunk(text=' '.join(current_chunk_sentences), source_url=source_url, index=len(chunks)))
-    
+        chunks.append(
+            TextChunk(
+                text=" ".join(current_chunk_sentences), source_url=source_url, index=len(chunks)
+            )
+        )
+
     return chunks
 
 
@@ -170,7 +182,7 @@ async def fetch_and_process_pages(urls):
         unique_urls = list(dict.fromkeys(urls))[:MAX_PAGES_PER_REQUEST]
         tasks = [fetch_page(session, url) for url in unique_urls]
         html_contents = await asyncio.gather(*tasks)
-        
+
         all_chunks = []
         for i, html in enumerate(html_contents):
             url = unique_urls[i]
