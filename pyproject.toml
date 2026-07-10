@@ -1,0 +1,55 @@
+[project]
+name = "brainy-bot"
+version = "0.1.0"
+description = "A fast multilingual Telegram chat with local-first inference"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { file = "LICENSE" }
+dependencies = [
+    "httpx>=0.28,<1",
+    "openai-whisper>=20231117",
+    "python-telegram-bot[job-queue]>=22.2,<23",
+    "torch>=2.3,<3",
+]
+
+[project.optional-dependencies]
+# Kept separate until the Stage 2 search contract replaces the legacy web path.
+web = [
+    "aiohttp>=3.12,<4",
+    "beautifulsoup4>=4.13,<5",
+    "nltk>=3.9,<4",
+]
+# Compatibility only while old deep modes are being characterized and removed.
+# Installing this group does not authorize calls to paid or quota-bearing services.
+legacy = [
+    "py3langid>=0.3,<1",
+    "scikit-learn>=1.7,<2",
+    "sentence-transformers>=5,<6",
+    "spacy>=3.8,<4",
+    "together>=1.5,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<10",
+    "ruff>=0.11,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["charts", "md"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.format]
+line-ending = "lf"

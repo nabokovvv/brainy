@@ -1,4 +1,3 @@
-import py3langid
 import re
 
 # Hardcoded translations for specific strings
@@ -99,6 +98,8 @@ def strip_think(text: str) -> str:
 
 def detect_language(text: str) -> str:
     """Detects the language of the given text using py3langid."""
+    import py3langid
+
     lang, _ = py3langid.classify(text)
     return lang
 

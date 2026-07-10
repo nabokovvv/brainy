@@ -1,96 +1,111 @@
-# Brainy Bot
+# Brainy
 
-A Telegram bot powered by Large Language Models (LLMs) for deep search and research, providing comprehensive answers and generating charts. Visit our website at https://askbrainy.com.
+Brainy is a fast, multilingual Telegram chat built around local-first inference. The
+product direction is one chat with an explicit `Web OFF/ON` switch:
 
-## Features
+- `Web OFF` sends the request directly to a local Ollama model.
+- `Web ON` will add a zero-cost search path with verifiable sources.
 
-*   **Web Search:** Fast answers with real-time context from the internet.
-*   **Deep Search:** For more complex questions, synthesizing information from multiple sources.
-*   **Deep Research:** Conducts multi-step research and provides detailed reports.
-*   **Chart Generation:** Visualizes key findings from research data.
-*   **Multilingual Support:** Communicates in multiple languages.
+The project is currently in **Stage 0**: the legacy runtime is being reduced to a
+reproducible local baseline. The single-chat UX and web path are not finished yet,
+and web access stays disabled by default.
 
-## Setup and Installation
+## Product boundaries
 
-### Prerequisites
+- Local inference is the default and must work without external provider keys.
+- Voice input with Whisper is a supported feature and will be preserved.
+- All eight existing locales remain supported: `de`, `en`, `es`, `fr`, `id`, `pt`,
+  `ru`, and `tr`.
+- The operating budget is zero. Paid models, paid search, chargeable fallbacks,
+  auto-top-ups, and Telegram Stars are not allowed.
+- Private conversations and voice transcripts must not be exported to Markdown or
+  otherwise persisted without an explicit retention decision.
+- Charts, standalone Deep Search, and Deep Research are outside the current MVP.
 
-*   Python 3.8+
-*   Telegram Bot Token (from BotFather)
-*   Yandex Search API Key
-*   Together AI API Key (or Ollama setup)
+See [the product strategy](docs/PRODUCT_STRATEGY.md) and
+[the execution plan](docs/EXECUTION_PLAN.md) for the approved scope and rollout.
 
-### Installation
+## Local setup
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/YOUR_USERNAME/brainy.git
-    cd brainy
-    ```
-2.  **Create a virtual environment (recommended):**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+The supported development setup uses [uv](https://docs.astral.sh/uv/) and Python
+3.12. Ollama App must be running locally. FFmpeg must also be available for Whisper
+voice input.
 
-### Configuration
+### 1. Install uv and Python 3.12
 
-Create a `config.py` file (or set environment variables) with your API keys and other settings.
-**IMPORTANT:** Never commit your actual API keys to version control. Use environment variables or a `.env` file.
-
-Example `config.py` (if you choose not to use environment variables directly):
-
-```python
-# config.py
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-YANDEX_API_KEY = "YOUR_YANDEX_API_KEY"
-TOGETHER_AI_API_KEY = "YOUR_TOGETHER_AI_API_KEY" # Or relevant API key for Ollama
-
-# LLM Client (choose "together" or "ollama")
-LLM_CLIENT = "together" 
-
-# Other configurations (e.g., model names, thresholds)
-TOGETHER_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-TOGETHER_DEEPSEEK = "deepseek-ai/deepseek-coder-6.7b-instruct"
-TOGETHER_WEB_SEARCH = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-TOGETHER_DEEPSEEK = "deepseek-ai/deepseek-coder-6.7b-instruct"
-DEEP_SEARCH_STEP_SIX_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-CREATIVE_PARAMS = {"temperature": 0.7, "top_k": 50, "top_p": 0.9, "frequency_penalty": 0.2, "repetition_penalty": 1.1}
-
-SEARCH_BACKEND = "yandex" # or "google" if you implement it
-RERANK_MODEL = "BAAI/bge-reranker-base"
-
-TOP_N = 5
-RERANK_THRESHOLD = 0.5
-```
-
-*   `MD_OUTPUT_DIR`: Directory for generated Markdown files (default: `md`).
-*   `CHARTS_OUTPUT_DIR`: Directory for generated chart images (default: `charts`).
-
-Alternatively, set these as environment variables:
+On macOS:
 
 ```bash
-export TELEGRAM_TOKEN="YOUR_TELEGRAM_BOT_TOKEN"
-export YANDEX_API_KEY="YOUR_YANDEX_API_KEY"
-export TOGETHER_AI_API_KEY="YOUR_TOGETHER_AI_API_KEY"
-# ... other variables
-export MD_OUTPUT_DIR="your_md_folder"
-export CHARTS_OUTPUT_DIR="your_charts_folder"
+brew install uv
+uv python install 3.12
 ```
 
-### Running the Bot
+On other systems, use the installation method from the official uv documentation.
+
+Then install the project and development dependencies:
 
 ```bash
-python bot.py
+uv sync --python 3.12
 ```
 
-## Contributing
+### 2. Configure the local runtime
 
-Contributions are welcome! Please open an issue or submit a pull request.
+Copy the safe example configuration:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set `TELEGRAM_TOKEN` when you want to run the Telegram bot. Keep
+these local defaults during Stage 0:
+
+```dotenv
+LLM_CLIENT=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+WEB_ENABLED_DEFAULT=false
+SEARCH_BACKEND=disabled
+```
+
+`OLLAMA_MODEL=gemma4:e2b` is only a provisional owner-provided name. Before relying
+on it, run `ollama list` on the target Mac and replace it with the exact installed
+Gemma tag. Do not enable web yet: a production-safe, zero-cost backend has not been
+integrated.
+
+Never commit `.env`, tokens, API keys, or real user data.
+
+### 3. Run the bot
+
+With Ollama App running and the exact model tag configured:
+
+```bash
+uv run --env-file .env python bot.py
+```
+
+The Telegram process requires `TELEGRAM_TOKEN`; disabled external providers do not
+require their keys.
+
+## Local quality gates
+
+Run the complete Stage 0 gate before committing code:
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/brainy-pycache uv run python -m compileall -q brainy_core tests *.py
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -q
+```
+
+Normal tests must not contact Telegram, Ollama, search backends, or external model
+providers.
+
+## Current limitations
+
+- The one-chat `Web OFF/ON` interface is the next product stage, not a completed UI.
+- Web search is disabled until a safe zero-cost provider contract is implemented.
+- The exact Gemma Ollama tag and 8K/32K/64K performance still need verification on
+  the target Mac mini M4 with 16 GB unified memory.
+- The repository is under active Stage 0 cleanup and is not production-ready.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Brainy is licensed under the MIT License. See [LICENSE](LICENSE).
