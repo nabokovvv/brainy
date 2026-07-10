@@ -33,7 +33,9 @@ generation выше исходного ориентира владельца 30 
 ## Остаётся
 
 - synthetic full-context fill для 32K/64K;
-- 15-question multilingual fixture; реальный прогон и ручная оценка pending;
+- 15-question multilingual run: 15/15 non-empty; ручная оценка 14/15. Единственная
+  ошибка — некорректная формулировка об изоляции дерева в индонезийском ответе;
+  подробные synthetic-only response/review fixtures находятся в `tests/results/`.
 - 3 concurrent-user benchmark;
 - combined-memory benchmark с рабочей моделью Whisper; FFmpeg и `whisper.cpp` есть,
   встроенный tiny-model smoke прошёл, но Brainy-adapter ещё не подключён.

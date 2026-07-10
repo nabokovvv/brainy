@@ -1,0 +1,14 @@
+{
+  "model": "gemma4:e2b",
+  "case_count": 15,
+  "reviewed_at": "2026-07-10",
+  "passed": 14,
+  "failed": 1,
+  "failures": [
+    {
+      "id": "id-01",
+      "reason": "Calls wood a poor thermal insulator; wood is a comparatively good insulator."
+    }
+  ],
+  "notes": "Synthetic local-only run. Review checks rubric, response language, and obvious factual errors."
+}

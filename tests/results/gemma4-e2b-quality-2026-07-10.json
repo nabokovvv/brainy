@@ -1,0 +1,137 @@
+[
+  {
+    "id": "en-01",
+    "language": "en",
+    "prompt": "Explain why a metal spoon feels colder than wood.",
+    "rubric": "Mentions thermal conductivity.",
+    "response": "Metal is a better conductor of heat than wood, so it rapidly draws heat away from your skin, making it feel colder.",
+    "nonempty": true,
+    "latency_ms": 1038
+  },
+  {
+    "id": "en-02",
+    "language": "en",
+    "prompt": "Give three practical steps for a weekly plan.",
+    "rubric": "Exactly three useful steps.",
+    "response": "1. **Brain Dump:** List all tasks and goals for the week.\n2. **Prioritize:** Identify the most important tasks (must-dos) using a system like the Eisenhower Matrix.\n3. **Schedule Blocks:** Assign specific times in your calendar for those prioritized tasks.",
+    "nonempty": true,
+    "latency_ms": 1770
+  },
+  {
+    "id": "en-03",
+    "language": "en",
+    "prompt": "What is the difference between a hypothesis and a theory?",
+    "rubric": "Scientifically accurate distinction.",
+    "response": "A **hypothesis** is a testable, proposed explanation for an observation. A **theory** is a well-substantiated, comprehensive explanation of a broad set of observations that has been repeatedly tested and supported by extensive evidence.",
+    "nonempty": true,
+    "latency_ms": 1476
+  },
+  {
+    "id": "en-04",
+    "language": "en",
+    "prompt": "Explain recursion using a tiny analogy.",
+    "rubric": "Simple and correct.",
+    "response": "Imagine a set of Russian nesting dolls. To open the biggest doll, you have to repeat the same action: open the doll inside it. That's recursion!",
+    "nonempty": true,
+    "latency_ms": 1154
+  },
+  {
+    "id": "es-01",
+    "language": "es",
+    "prompt": "Explica por qué el cielo se ve azul.",
+    "rubric": "Dispersión de la luz; español.",
+    "response": "El cielo se ve azul debido a la **dispersión de Rayleigh**.\n\nLa luz del sol, que parece blanca, está compuesta por diferentes longitudes de onda (colores). Cuando esta luz viaja a través de la atmósfera terrestre, choca con las pequeñas moléculas de gas (principalmente nitrógeno y oxígeno). Estas moléculas dispersan la luz de manera más efectiva las longitudes de onda cortas (azul y violeta) que las longitudes de onda largas (rojo).\n\nComo el azul se dispersa más que otros colores, llega a nuestros ojos desde todas direcciones, haciendo que el cielo parezca azul.",
+    "nonempty": true,
+    "latency_ms": 3450
+  },
+  {
+    "id": "es-02",
+    "language": "es",
+    "prompt": "¿Cuál es la diferencia entre RAM y almacenamiento?",
+    "rubric": "Temporal frente a persistente.",
+    "response": "La **RAM (Memoria de Acceso Aleatorio)** es memoria volátil y rápida que el procesador usa para almacenar temporalmente los datos y programas que se están utilizando activamente. Es para el trabajo en curso.\n\nEl **Almacenamiento** (como un SSD o un disco duro HDD) es memoria no volátil donde se guardan permanentemente tus archivos, el sistema operativo y los programas, incluso cuando el equipo está apagado. Es para la persistencia de datos.",
+    "nonempty": true,
+    "latency_ms": 2811
+  },
+  {
+    "id": "ru-01",
+    "language": "ru",
+    "prompt": "Коротко объясни, почему металл кажется холоднее дерева.",
+    "rubric": "Упоминает теплопроводность.",
+    "response": "Металлы проводят тепло быстрее, чем дерево, поэтому они быстрее отводят тепло от вашей руки, создавая ощущение холода.",
+    "nonempty": true,
+    "latency_ms": 1022
+  },
+  {
+    "id": "ru-02",
+    "language": "ru",
+    "prompt": "Дай три шага для понятного недельного плана.",
+    "rubric": "Ровно три практичных шага.",
+    "response": "1. **Определите цели:** Что вы хотите достичь за неделю?\n2. **Составьте список задач:** Запишите все, что нужно сделать.\n3. **Распределите и запланируйте:** Разделите задачи по дням и времени.",
+    "nonempty": true,
+    "latency_ms": 1749
+  },
+  {
+    "id": "ru-03",
+    "language": "ru",
+    "prompt": "Чем гипотеза отличается от теории?",
+    "rubric": "Корректное научное различие.",
+    "response": "Гипотеза — это предположение, которое требует проверки. Теория — это хорошо обоснованное объяснение явлений, подтвержденное множеством проверенных гипотез.",
+    "nonempty": true,
+    "latency_ms": 1258
+  },
+  {
+    "id": "ru-04",
+    "language": "ru",
+    "prompt": "Объясни рекурсию через короткую аналогию.",
+    "rubric": "Просто и верно.",
+    "response": "Рекурсия — это как **зеркало, смотрящее в себя**.\n\nЧтобы решить сложную задачу, она вызывает саму себя для решения **более простой версии той же самой задачи**. Это продолжается до тех пор, пока не будет найдено самое простое решение (базовый случай), которое можно сразу дать.",
+    "nonempty": true,
+    "latency_ms": 1974
+  },
+  {
+    "id": "pt-01",
+    "language": "pt",
+    "prompt": "Explique por que uma colher de metal parece mais fria que uma de madeira.",
+    "rubric": "Condutividade térmica em português.",
+    "response": "O metal conduz o calor mais rapidamente do seu corpo para a colher, fazendo com que ela pareça mais fria ao toque. A madeira é um isolante térmico, retardando a transferência de calor e mantendo sua temperatura mais próxima da temperatura ambiente.",
+    "nonempty": true,
+    "latency_ms": 1652
+  },
+  {
+    "id": "fr-01",
+    "language": "fr",
+    "prompt": "Explique pourquoi une cuillère en métal paraît plus froide qu'une en bois.",
+    "rubric": "Conductivité thermique en français.",
+    "response": "Le métal conduit très bien la chaleur, ce qui fait que votre main transfère rapidement la chaleur de votre corps vers la cuillère. Cela donne l'impression qu'elle est plus froide. Le bois, lui, est un isolant et ralentit ce transfert de chaleur.",
+    "nonempty": true,
+    "latency_ms": 1727
+  },
+  {
+    "id": "de-01",
+    "language": "de",
+    "prompt": "Erkläre, warum sich ein Metalllöffel kälter anfühlt als Holz.",
+    "rubric": "Wärmeleitfähigkeit auf Deutsch.",
+    "response": "Metalle leiten Wärme viel besser als Holz. Daher fühlt sich der Metalllöffel schneller und intensiver kalt an, da er die Wärme von Ihrer Hand schneller abführt.",
+    "nonempty": true,
+    "latency_ms": 1257
+  },
+  {
+    "id": "tr-01",
+    "language": "tr",
+    "prompt": "Metal kaşığın neden tahtadan daha soğuk hissettirdiğini açıkla.",
+    "rubric": "Isı iletkenliği; Türkçe.",
+    "response": "Metal, ısıyı çok iyi ilettiği için tahtadan daha hızlı soğur ve bu da elinize daha soğuk bir his verir. Tahta ise yalıtkan olduğu için ısıyı daha yavaş iletir.",
+    "nonempty": true,
+    "latency_ms": 1509
+  },
+  {
+    "id": "id-01",
+    "language": "id",
+    "prompt": "Jelaskan mengapa sendok logam terasa lebih dingin daripada kayu.",
+    "rubric": "Konduktivitas panas; bahasa Indonesia.",
+    "response": "Sendok logam terasa lebih dingin karena logam adalah konduktor panas yang sangat baik. Ini berarti logam dengan cepat menyerap panas dari tangan Anda, menyebabkan sensasi dingin. Kayu, di sisi lain, adalah isolator panas yang buruk dan lambat, sehingga tidak menyerap panas secepat logam, membuatnya terasa lebih hangat atau netral.",
+    "nonempty": true,
+    "latency_ms": 2033
+  }
+]

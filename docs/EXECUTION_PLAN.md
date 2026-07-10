@@ -202,8 +202,9 @@ multilingual, concurrency и Whisper combined-memory прогоны.
 
 Gate:
 
-- минимум 15-question multilingual fixture сохранён в репозитории без персональных
-  данных; отдельный runner и ручная оценка остаются обязательными для quality gate;
+- минимум 15-question multilingual fixture и loopback-only runner сохранены в
+  репозитории без персональных данных; runner может сохранять только ответы на эти
+  fixture в versioned JSON для ручной оценки, никогда не реальные диалоги;
 - local TTFT/complete/RSS/swap измерены по мягким ориентирам из `PRODUCT_STRATEGY.md`, включая warm-process сценарий с загруженным Whisper;
 - 3 concurrent-user benchmark не приводит к swap или starvation;
 - UI tests проверяют Markdown, long-message split и Telegram edit limits.
