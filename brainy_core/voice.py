@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -27,11 +28,12 @@ def _load_whisper_model(model_name: str) -> WhisperModel:
 async def _run_blocking_call(function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Delay cancellation until the underlying thread has actually stopped using inputs."""
 
-    thread_task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    loop = asyncio.get_running_loop()
+    thread_future = loop.run_in_executor(None, partial(function, *args, **kwargs))
     cancellation_requested = False
     while True:
         try:
-            result = await asyncio.shield(thread_task)
+            result = await asyncio.shield(thread_future)
             break
         except asyncio.CancelledError:
             cancellation_requested = True

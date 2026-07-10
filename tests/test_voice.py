@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import threading
+import textwrap
 import time
 import unittest
 
@@ -83,6 +86,50 @@ class BlockingLoader:
 
 
 class WhisperTranscriberTests(unittest.IsolatedAsyncioTestCase):
+    def test_global_asyncio_shutdown_does_not_hang_on_transcription(self) -> None:
+        script = textwrap.dedent(
+            """
+            import asyncio
+            import threading
+            import time
+
+            from brainy_core.voice import WhisperTranscriber
+
+
+            class Model:
+                def __init__(self):
+                    self.entered = threading.Event()
+
+                def transcribe(self, audio_path, **options):
+                    self.entered.set()
+                    time.sleep(0.05)
+                    return {"text": "done"}
+
+
+            async def main():
+                model = Model()
+                transcriber = WhisperTranscriber("base", loader=lambda _: model)
+                asyncio.create_task(transcriber.transcribe("voice.oga", language="en"))
+                while not model.entered.is_set():
+                    await asyncio.sleep(0)
+
+
+            asyncio.run(main())
+            print("shutdown-complete")
+            """
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("shutdown-complete", result.stdout)
+
     async def test_preserves_existing_transcription_options_and_reuses_model(self) -> None:
         model = FakeWhisperModel()
         loads: list[str] = []
