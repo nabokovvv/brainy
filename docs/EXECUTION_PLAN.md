@@ -1,6 +1,36 @@
 # Brainy: пошаговый план и агентный workflow
 
-Статус аудита: 2026-07-10. Рабочее дерево на момент аудита было чистым; тестов, CI и `AGENTS.md` не было.
+Статус аудита: 2026-07-10. Рабочее дерево на момент первичного аудита было чистым; тестов, CI и `AGENTS.md` не было.
+
+## Текущий checkpoint Stage 0
+
+Локально завершены slices 0.1 и 0.2 в части, не требующей скачивания пакетов или
+реальных credentials:
+
+- добавлены `pyproject.toml`, безопасный `.env.example` и local-first README;
+- конфигурация импортируется без Telegram/Together/Yandex/Wikidata keys и fail-closed
+  отклоняет Web/remote inference;
+- добавлены provider-neutral contracts и bounded Ollama adapter с shared client,
+  общим deadline, response cap, loopback-only default и concurrency `1`;
+- Whisper сохранён, загружается лениво и сериализует как загрузку, так и
+  транскрибацию, включая cancellation path;
+- очередь bounded и stable для одинаковых priority; route/language фиксируются в
+  request snapshot;
+- charts и автоматический Markdown-экспорт приватных разговоров удалены;
+- все 8 локалей и фиксированный baseline из 26 ключей защищены тестом;
+- 44 offline regression/contract tests проходят, Python 3.12 `compileall` green.
+
+Локальные коммиты checkpoint: `a842d48`, `4fff399`, `2911107`, `57d1083`.
+
+Stage 0 ещё не закрыт. До exit gate остаются:
+
+- сгенерировать `uv.lock`, выполнить clean `uv sync`, Ruff и полный pytest после
+  восстановления доступа к package registry;
+- real smoke Ollama/Whisper/Telegram: на текущем MacBook не установлены Ollama и
+  FFmpeg, а target model tag должен быть подтверждён на Mac mini;
+- закончить privacy/network hardening legacy web кода либо удалить его вместе со
+  старыми mode paths;
+- добавить CI после появления lockfile.
 
 ## Исходное состояние
 
@@ -27,11 +57,14 @@
 - Нет streaming: «Fast» показывает typing до полного ответа.
 - Состояние, очередь и настройки пользователей теряются при рестарте.
 
-Baseline-команда сейчас честно падает на syntax error:
+На момент первичного аудита baseline-команда падала на syntax error:
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/brainy-pycache python3 -m py_compile *.py
 ```
+
+В текущем checkpoint этот compile gate исправлен; список выше сохранён как
+историческая причина Stage 0, а не как описание текущего HEAD.
 
 ## Как запускается работа
 
