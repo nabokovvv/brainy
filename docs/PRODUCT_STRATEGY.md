@@ -78,7 +78,8 @@ Production runtime не должен зависеть от MCP-процесса.
 Решение с нулевым бюджетом:
 
 1. Начать с бесплатного DuckDuckGo-compatible Python/HTTP backend как best-effort search path, с cache, throttling и circuit breaker.
-2. Существующий Yandex допустим только если текущий аккаунт не может создать списания; убрать hardcoded `folderId`.
+2. Удалённый legacy Yandex path не переносим в новый runtime. Возврат возможен только
+   через новый adapter и при доказанной невозможности списаний; для MVP он не нужен.
 3. Brave и любые backends с платным тарифом/риском списания не включать.
 4. Свой Docker search engine не поднимаем на MVP.
 

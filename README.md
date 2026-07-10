@@ -6,9 +6,11 @@ product direction is one chat with an explicit `Web OFF/ON` switch:
 - `Web OFF` sends the request directly to a local Ollama model.
 - `Web ON` will add a zero-cost search path with verifiable sources.
 
-The project is currently in **Stage 0**: the legacy runtime is being reduced to a
-reproducible local baseline. The single-chat UX and web path are not finished yet,
-and web access stays disabled by default.
+The project is at the **Stage 0 / early Stage 1 checkpoint**. The runtime now exposes
+one local chat path; the old Deep/Web modes and their provider stack have been
+removed. The spaCy/reranker/page/Wikidata research utilities are preserved as a
+dormant optional extra for later audit. The explicit Web ON path is not implemented
+yet and remains fail-closed.
 
 ## Product boundaries
 
@@ -47,6 +49,15 @@ Then install the project and development dependencies:
 ```bash
 uv sync --python 3.12
 ```
+
+The preserved spaCy/reranker/page utilities are optional and are not needed for the
+fast chat. Install them only while working on the future research path:
+
+```bash
+uv sync --python 3.12 --extra research
+```
+
+spaCy language models are intentionally not downloaded at import time.
 
 ### 2. Configure the local runtime
 
@@ -100,7 +111,7 @@ providers.
 
 ## Current limitations
 
-- The one-chat `Web OFF/ON` interface is the next product stage, not a completed UI.
+- The current chat always behaves as `Web OFF`; the visible Web ON switch is next.
 - Web search is disabled until a safe zero-cost provider contract is implemented.
 - The exact Gemma Ollama tag and 8K/32K/64K performance still need verification on
   the target Mac mini M4 with 16 GB unified memory.

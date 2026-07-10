@@ -18,7 +18,7 @@
   request snapshot;
 - charts и автоматический Markdown-экспорт приватных разговоров удалены;
 - все 8 локалей и фиксированный baseline из 26 ключей защищены тестом;
-- 44 offline regression/contract tests проходят, Python 3.12 `compileall` green.
+- 55 offline regression/contract tests проходят, Python 3.12 `compileall` green.
 
 Локальные коммиты checkpoint: `a842d48`, `4fff399`, `2911107`, `57d1083`.
 
@@ -28,8 +28,8 @@ Stage 0 ещё не закрыт. До exit gate остаются:
   восстановления доступа к package registry;
 - real smoke Ollama/Whisper/Telegram: на текущем MacBook не установлены Ollama и
   FFmpeg, а target model tag должен быть подтверждён на Mac mini;
-- закончить privacy/network hardening legacy web кода либо удалить его вместе со
-  старыми mode paths;
+- проверить и укрепить сохранённые optional research utilities до подключения к
+  будущему Web ON path;
 - добавить CI после появления lockfile.
 
 ## Исходное состояние
@@ -163,6 +163,12 @@ Exit Stage 0:
 ## Stage 1 — One fast mode
 
 Цель: один понятный UX и доказанное преимущество скорости на Mac mini M4 16 GB.
+
+Checkpoint: старые mode handlers и Together/Yandex provider adapters удалены.
+spaCy/Wikidata/reranker/page utilities сохранены отдельным optional research extra и
+не импортируются fast path. Runtime оставляет один local chat path и Whisper.
+Следующий slice — аудит этих utilities, затем явный `Web OFF/ON` intent без включения
+поиска до готовности Stage 2 adapter.
 
 - Заменить четыре режима одним чатом и явным persistent-переключателем `Web OFF/ON`; никакого LLM/freshness preflight.
 - Подключить установленную Gemma 4 E2B как benchmark baseline и зафиксировать точный Ollama tag на Mac.
