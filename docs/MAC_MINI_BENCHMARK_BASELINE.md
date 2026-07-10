@@ -40,11 +40,23 @@ RSS стабилизировался около 5.9 GB, использованн
 Сырые метрики сохранены в `tests/results/gemma4-e2b-concurrency-2026-07-11.json`.
 Этот bounded batch не является длительным fairness/load-тестом.
 
+## Full-context retention smoke
+
+2026-07-11 synthetic prompts с маркерами в начале и конце проверены при 32K и 64K
+context. Фактические `prompt_eval_count` — 32,000 и 64,000; оба ответа сохранили оба
+маркера. Новый swap не появился. 32K: TTFT 69.84 s, input 469 tok/s, RSS 6.44 GB.
+64K: TTFT 191.78 s, input 337 tok/s, RSS 6.82 GB. Это подтверждает доступность и
+базовое удержание контекста, но не качество длинных ответов. Число filler-токенов
+эвристическое; authoritative значение — `prompt_eval_count` из Ollama. Метрики:
+`tests/results/gemma4-e2b-full-context-{32k,64k}-2026-07-11.json`.
+
+## Multilingual quality
+
+15-question synthetic run дал 15/15 non-empty и 14/15 по ручной оценке. Единственная
+ошибка — некорректная формулировка об изоляции дерева в индонезийском ответе.
+Response и review fixtures сохранены в `tests/results/`.
+
 ## Остаётся
 
-- synthetic full-context fill для 32K/64K;
-- 15-question multilingual run: 15/15 non-empty; ручная оценка 14/15. Единственная
-  ошибка — некорректная формулировка об изоляции дерева в индонезийском ответе;
-  подробные synthetic-only response/review fixtures находятся в `tests/results/`.
 - combined-memory benchmark с рабочей моделью Whisper; FFmpeg и `whisper.cpp` есть,
   встроенный tiny-model smoke прошёл, но Brainy-adapter ещё не подключён.

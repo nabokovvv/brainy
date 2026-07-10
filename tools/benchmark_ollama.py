@@ -8,8 +8,10 @@ import ipaddress
 import json
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -29,6 +31,9 @@ class BenchmarkResult:
     ollama_rss_kib_after: int | None
     swap_before: str | None
     swap_after: str | None
+    prompt_tokens: int | None = None
+    prompt_tokens_per_second: float | None = None
+    expected_markers_seen: bool | None = None
 
 
 def _require_loopback_url(url: str) -> str:
@@ -101,6 +106,56 @@ def _chat_payload(
     }
 
 
+def _synthetic_context_prompt(target_tokens: int) -> tuple[str, tuple[str, ...]]:
+    if target_tokens < 64:
+        raise ValueError("synthetic input target must be at least 64 tokens")
+    first_marker = "ALPHA-314159"
+    second_marker = "OMEGA-271828"
+    prompt = (
+        f"Remember this first code: {first_marker}."
+        + " filler" * (target_tokens - 48)
+        + f" Remember this second code: {second_marker}. "
+        "Reply with the first and second remembered codes only."
+    )
+    return prompt, (first_marker, second_marker)
+
+
+def _serialize_result(result: BenchmarkResult) -> str:
+    return json.dumps(asdict(result), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _write_result(path: Path, serialized: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary:
+            temporary.write(serialized)
+            temporary_path = Path(temporary.name)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
+def _update_marker_state(
+    *,
+    seen: set[str],
+    tail: str,
+    content: str,
+    markers: tuple[str, ...],
+) -> tuple[set[str], str]:
+    marker_chunk = tail + content
+    seen.update(marker for marker in markers if marker in marker_chunk)
+    marker_window = max((len(marker) for marker in markers), default=1)
+    return seen, marker_chunk[-(marker_window - 1) :] if marker_window > 1 else ""
+
+
 def benchmark(
     *,
     base_url: str,
@@ -110,6 +165,7 @@ def benchmark(
     context_tokens: int,
     max_output_tokens: int,
     timeout_seconds: float,
+    expected_markers: tuple[str, ...] = (),
 ) -> BenchmarkResult:
     if not model.strip() or not prompt.strip() or not case_id.strip():
         raise ValueError("model, prompt, and case_id must be non-empty")
@@ -134,21 +190,41 @@ def benchmark(
     started = time.perf_counter()
     first_token_at: float | None = None
     completion_tokens: int | None = None
+    prompt_tokens: int | None = None
+    prompt_eval_duration: int | None = None
+    seen_markers: set[str] = set()
+    marker_tail = ""
 
     # The target is restricted to loopback by _require_loopback_url above.
     with urlopen(request, timeout=timeout_seconds) as response:
         for event in _stream_events(response):
             content = event.get("message", {}).get("content", "")
+            if content and expected_markers:
+                seen_markers, marker_tail = _update_marker_state(
+                    seen=seen_markers,
+                    tail=marker_tail,
+                    content=content,
+                    markers=expected_markers,
+                )
             if content and first_token_at is None:
                 first_token_at = time.perf_counter()
             if event.get("done") and isinstance(event.get("eval_count"), int):
                 completion_tokens = event["eval_count"]
+                prompt_tokens = event.get("prompt_eval_count")
+                prompt_eval_duration = event.get("prompt_eval_duration")
 
     finished = time.perf_counter()
     generation_seconds = finished - first_token_at if first_token_at is not None else None
     tokens_per_second = (
         completion_tokens / generation_seconds
         if completion_tokens is not None and generation_seconds and generation_seconds > 0
+        else None
+    )
+    prompt_tokens_per_second = (
+        prompt_tokens / (prompt_eval_duration / 1_000_000_000)
+        if isinstance(prompt_tokens, int)
+        and isinstance(prompt_eval_duration, int)
+        and prompt_eval_duration > 0
         else None
     )
     return BenchmarkResult(
@@ -166,33 +242,51 @@ def benchmark(
         ollama_rss_kib_after=_ollama_rss_kib(),
         swap_before=swap_before,
         swap_after=_swap_usage(),
+        prompt_tokens=prompt_tokens,
+        prompt_tokens_per_second=round(prompt_tokens_per_second, 2)
+        if prompt_tokens_per_second
+        else None,
+        expected_markers_seen=(
+            all(marker in seen_markers for marker in expected_markers) if expected_markers else None
+        ),
     )
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
-    parser.add_argument("--prompt", required=True)
+    prompt_group = parser.add_mutually_exclusive_group(required=True)
+    prompt_group.add_argument("--prompt")
+    prompt_group.add_argument("--synthetic-input-tokens", type=int)
     parser.add_argument("--case-id", required=True)
     parser.add_argument("--context-tokens", type=int, default=8_192)
     parser.add_argument("--max-output-tokens", type=int, default=128)
     parser.add_argument("--base-url", default="http://127.0.0.1:11434")
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
+    expected_markers: tuple[str, ...] = ()
+    prompt = args.prompt
+    if args.synthetic_input_tokens is not None:
+        prompt, expected_markers = _synthetic_context_prompt(args.synthetic_input_tokens)
     result = benchmark(
         base_url=args.base_url,
         model=args.model,
-        prompt=args.prompt,
+        prompt=prompt,
         case_id=args.case_id,
         context_tokens=args.context_tokens,
         max_output_tokens=args.max_output_tokens,
         timeout_seconds=args.timeout_seconds,
+        expected_markers=expected_markers,
     )
-    print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
+    serialized = _serialize_result(result)
+    if args.output:
+        _write_result(args.output, serialized)
+    print(serialized, end="")
 
 
 if __name__ == "__main__":

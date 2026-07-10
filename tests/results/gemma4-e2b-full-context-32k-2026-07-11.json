@@ -1,0 +1,17 @@
+{
+  "case_id": "full-context-32k",
+  "completion_tokens": 19,
+  "context_tokens": 32768,
+  "expected_markers_seen": true,
+  "generation_tokens_per_second": 32.7,
+  "max_output_tokens": 32,
+  "model": "gemma4:e2b",
+  "ollama_rss_kib_after": 6444672,
+  "ollama_rss_kib_before": 104384,
+  "prompt_tokens": 32000,
+  "prompt_tokens_per_second": 469.33,
+  "swap_after": "total = 2048.00M  used = 1055.38M  free = 992.62M  (encrypted)",
+  "swap_before": "total = 2048.00M  used = 1055.38M  free = 992.62M  (encrypted)",
+  "total_ms": 70416.5,
+  "ttft_ms": 69835.6
+}

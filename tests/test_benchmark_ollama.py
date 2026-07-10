@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from tools.benchmark_ollama import _chat_payload, _is_ollama_process, _require_loopback_url
+from tools.benchmark_ollama import (
+    BenchmarkResult,
+    _chat_payload,
+    _is_ollama_process,
+    _require_loopback_url,
+    _serialize_result,
+    _synthetic_context_prompt,
+    _update_marker_state,
+    _write_result,
+)
 
 
 class OllamaBenchmarkTests(unittest.TestCase):
@@ -38,3 +49,55 @@ class OllamaBenchmarkTests(unittest.TestCase):
             with self.subTest(url=url):
                 with self.assertRaises(ValueError):
                     _require_loopback_url(url)
+
+    def test_synthetic_context_has_markers_separated_by_requested_filler(self) -> None:
+        prompt, markers = _synthetic_context_prompt(1_024)
+
+        self.assertTrue(all(marker in prompt for marker in markers))
+        self.assertGreater(prompt.count(" filler"), 900)
+        self.assertLess(prompt.index(markers[0]), prompt.index(markers[1]))
+
+    def test_serialized_result_contains_metrics_but_no_prompt_or_response(self) -> None:
+        result = BenchmarkResult(
+            case_id="full-context-32k",
+            model="gemma4:e2b",
+            context_tokens=32_768,
+            max_output_tokens=32,
+            ttft_ms=1.0,
+            total_ms=2.0,
+            completion_tokens=2,
+            generation_tokens_per_second=3.0,
+            ollama_rss_kib_before=4,
+            ollama_rss_kib_after=5,
+            swap_before="6",
+            swap_after="6",
+            prompt_tokens=32_000,
+            prompt_tokens_per_second=7.0,
+            expected_markers_seen=True,
+        )
+
+        serialized = _serialize_result(result)
+
+        self.assertIn('"prompt_tokens": 32000', serialized)
+        self.assertNotIn('"prompt":', serialized)
+        self.assertNotIn('"response":', serialized)
+
+    def test_result_file_is_created_in_a_new_directory(self) -> None:
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "nested" / "result.json"
+
+            _write_result(output, '{"safe": true}\n')
+
+            self.assertEqual(output.read_text(encoding="utf-8"), '{"safe": true}\n')
+
+    def test_marker_tracker_detects_marker_split_across_chunks(self) -> None:
+        markers = ("ALPHA-314159",)
+        seen, tail = _update_marker_state(
+            seen=set(), tail="", content="answer ALPHA-", markers=markers
+        )
+        seen, tail = _update_marker_state(
+            seen=seen, tail=tail, content="314159 done", markers=markers
+        )
+
+        self.assertEqual(seen, set(markers))
+        self.assertLessEqual(len(tail), len(markers[0]) - 1)
