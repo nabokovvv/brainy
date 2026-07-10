@@ -35,5 +35,5 @@ generation выше исходного ориентира владельца 30 
 - synthetic full-context fill для 32K/64K;
 - 50-question multilingual quality eval;
 - 3 concurrent-user benchmark;
-- same benchmark с загруженным Whisper; на target сейчас `ffmpeg` не найден в PATH,
-  поэтому voice smoke ещё не запускался.
+- combined-memory benchmark с рабочей моделью Whisper; FFmpeg и `whisper.cpp` есть,
+  встроенный tiny-model smoke прошёл, но Brainy-adapter ещё не подключён.

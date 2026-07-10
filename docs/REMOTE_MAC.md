@@ -20,7 +20,7 @@ ssh lobster@Mac.local
 hostname
 ipconfig getifaddr en1
 curl --fail --max-time 3 http://127.0.0.1:11434/api/tags
-ffmpeg -version
+/opt/homebrew/bin/ffmpeg -version
 ```
 
 Ollama App может не добавлять CLI `ollama` в shell `PATH`, поэтому readiness
@@ -43,8 +43,9 @@ fast path передавать `reasoning_effort: "none"` через OpenAI-comp
 Key-based SSH через `lobster@Mac.local` подтверждён; для будущих сессий не нужны
 пароль или IP.
 
-## Целевые замеры Stage 1
+## Voice status
 
-На Mac mini M4 16 GB измерить для exact Gemma tag: TTFT, tokens/s, full latency,
-RSS и swap на 8K/32K/64K context; повторить warm-process сценарий с загруженным
-Whisper. Результаты не должны содержать пользовательские prompts или ответы.
+`/opt/homebrew/bin/ffmpeg` и Homebrew `whisper.cpp` (`whisper-cli` 1.9.1) уже
+установлены. Встроенный публичный tiny-model smoke прошёл 2026-07-10. Brainy пока
+использует lazy Python `openai-whisper`, поэтому это не означает готовой интеграции:
+не скачивать модели и не ставить зависимости без отдельного разрешения владельца.
