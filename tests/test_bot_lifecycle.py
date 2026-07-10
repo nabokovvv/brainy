@@ -8,6 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from brainy_core import RouteIntent
 from brainy_core.scheduling import StablePriorityQueue
 
 
@@ -88,6 +89,19 @@ class _Message:
         self.replies.append(text)
 
 
+class _CallbackQuery:
+    def __init__(self, data: str) -> None:
+        self.data = data
+        self.edits: list[tuple[str, object | None]] = []
+        self.answered = False
+
+    async def answer(self) -> None:
+        self.answered = True
+
+    async def edit_message_text(self, *, text: str, reply_markup: object | None = None) -> None:
+        self.edits.append((text, reply_markup))
+
+
 class _VoiceFile:
     async def download_to_drive(self, path: str) -> None:
         return None
@@ -121,6 +135,15 @@ class _FailingTranscriber:
 
 class _SuccessfulTranscriber:
     async def transcribe(self, path: str, *, language: str) -> str:
+        return "voice text"
+
+
+class _StateMutatingTranscriber:
+    def __init__(self, chat_data: dict[str, object]) -> None:
+        self.chat_data = chat_data
+
+    async def transcribe(self, path: str, *, language: str) -> str:
+        self.chat_data.update(language="en", web_enabled=True)
         return "voice text"
 
 
@@ -176,7 +199,7 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
             chat_data={"language": "en"},
         )
         update = SimpleNamespace(message=message)
-        request = bot.Request(update, context, 7, "question", "ru")
+        request = bot.Request(update, context, 7, "question", "ru", RouteIntent.LOCAL)
         await queue.put(1, request)
 
         async def fake_handler(update, context, query, *, language=None) -> None:
@@ -203,6 +226,84 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(task, return_exceptions=True)
 
         self.assertEqual(captured, ["ru"])
+
+    async def test_worker_fails_closed_for_web_snapshot_without_calling_local_model(self) -> None:
+        queue = StablePriorityQueue(maxsize=1)
+        message = _Message()
+        application = SimpleNamespace(bot_data={"llm_semaphore": asyncio.Semaphore(1)})
+        context = SimpleNamespace(
+            application=application,
+            bot=object(),
+            chat_data={"language": "en", "web_enabled": False},
+        )
+        update = SimpleNamespace(message=message)
+        await queue.put(1, bot.Request(update, context, 7, "latest news", "en", RouteIntent.WEB))
+
+        async def forbidden_local_handler(*args: object, **kwargs: object) -> None:
+            raise AssertionError("Web requests must not silently use local inference")
+
+        async def fake_typing(bot_instance, chat_id) -> None:
+            await asyncio.Event().wait()
+
+        with (
+            patch.object(bot, "fast_reply_handler", forbidden_local_handler),
+            patch.object(bot, "send_typing_periodically", fake_typing),
+        ):
+            task = asyncio.create_task(
+                bot.worker(
+                    "test",
+                    queue,
+                    {"translator": _Translator(), "chat_locks": {}},
+                )
+            )
+            await asyncio.wait_for(queue.join(), timeout=1)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertEqual(message.replies, ["web_unavailable:en"])
+
+    async def test_buffer_keeps_route_and_language_from_first_message(self) -> None:
+        chat_id = 21
+        queue = StablePriorityQueue(maxsize=1)
+        message = _Message()
+        update = SimpleNamespace(message=message)
+        context = SimpleNamespace(
+            job=SimpleNamespace(chat_id=chat_id),
+            chat_data={"language": "ru", "web_enabled": False},
+            application=SimpleNamespace(
+                bot_data={"request_queue": queue, "translator": _Translator()}
+            ),
+        )
+        bot.user_message_buffers[chat_id] = ["first"]
+        bot.user_last_update[chat_id] = update
+        bot._capture_request_snapshot(context, chat_id)
+        context.chat_data.update(language="en", web_enabled=True)
+
+        try:
+            await bot.process_buffered_messages(context)
+            _, request = await queue.get()
+
+            self.assertEqual(request.language, "ru")
+            self.assertIs(request.route_intent, RouteIntent.LOCAL)
+        finally:
+            queue.task_done()
+            bot.user_message_buffers.pop(chat_id, None)
+            bot.user_last_update.pop(chat_id, None)
+            bot.user_job_trackers.pop(chat_id, None)
+            bot.user_request_snapshots.pop(chat_id, None)
+
+    async def test_web_toggle_updates_chat_state_without_running_search(self) -> None:
+        callback = _CallbackQuery(bot.ACTION_TOGGLE_WEB)
+        context = SimpleNamespace(
+            chat_data={"language": "en", "web_enabled": False},
+            application=SimpleNamespace(bot_data={"translator": _Translator()}),
+        )
+
+        await bot.button(SimpleNamespace(callback_query=callback), context)
+
+        self.assertTrue(callback.answered)
+        self.assertTrue(context.chat_data["web_enabled"])
+        self.assertEqual(callback.edits[0][0], "web_status_on:en")
 
     async def test_voice_failure_replies_and_cleans_status(self) -> None:
         chat_id = 11
@@ -245,6 +346,7 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         bot.user_message_buffers.pop(chat_id, None)
         bot.user_last_update.pop(chat_id, None)
         bot.user_job_trackers.pop(chat_id, None)
+        bot.user_request_snapshots.pop(chat_id, None)
 
         try:
             await bot.handle_voice_message(update, context)
@@ -256,6 +358,40 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
             bot.user_message_buffers.pop(chat_id, None)
             bot.user_last_update.pop(chat_id, None)
             bot.user_job_trackers.pop(chat_id, None)
+            bot.user_request_snapshots.pop(chat_id, None)
+
+    async def test_voice_keeps_route_and_language_from_before_transcription(self) -> None:
+        chat_id = 13
+        telegram_bot = _Bot()
+        message = _Message(_Voice())
+        update = SimpleNamespace(effective_chat=SimpleNamespace(id=chat_id), message=message)
+        job_queue = _JobQueue()
+        chat_data: dict[str, object] = {"language": "ru", "web_enabled": False}
+        context = SimpleNamespace(
+            bot=telegram_bot,
+            chat_data=chat_data,
+            job_queue=job_queue,
+            application=SimpleNamespace(
+                bot_data={
+                    "translator": _Translator(),
+                    "whisper_transcriber": _StateMutatingTranscriber(chat_data),
+                }
+            ),
+        )
+
+        try:
+            await bot.handle_voice_message(update, context)
+
+            self.assertEqual(
+                bot.user_request_snapshots[chat_id],
+                ("ru", RouteIntent.LOCAL),
+            )
+            self.assertEqual(chat_data, {"language": "en", "web_enabled": True})
+        finally:
+            bot.user_message_buffers.pop(chat_id, None)
+            bot.user_last_update.pop(chat_id, None)
+            bot.user_job_trackers.pop(chat_id, None)
+            bot.user_request_snapshots.pop(chat_id, None)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,9 @@ EXPECTED_KEYS = {
     "sources_label",
     "trying_fast_reply",
     "waiting_in_queue",
+    "web_status_off",
+    "web_status_on",
+    "web_unavailable",
     "welcome_new_user",
 }
 EXPECTED_CONTENT_LANGUAGES = {"de", "en", "es", "id", "pt", "ru", "tr"}

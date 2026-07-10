@@ -7,10 +7,11 @@ product direction is one chat with an explicit `Web OFF/ON` switch:
 - `Web ON` will add a zero-cost search path with verifiable sources.
 
 The project is at the **Stage 0 / early Stage 1 checkpoint**. The runtime now exposes
-one local chat path; the old Deep/Web modes and their provider stack have been
-removed. The spaCy/reranker/page/Wikidata research utilities are preserved as a
-dormant optional extra for later audit. The explicit Web ON path is not implemented
-yet and remains fail-closed.
+one chat with an explicit `Web OFF/ON` route switch; the old Deep/Web modes and their
+provider stack have been removed. The spaCy/reranker/page/Wikidata research utilities
+are preserved as a dormant optional extra for Stage 2. Web ON search is not
+implemented yet and therefore fails closed instead of silently returning a local
+answer as fresh.
 
 ## Product boundaries
 
@@ -111,7 +112,8 @@ providers.
 
 ## Current limitations
 
-- The current chat always behaves as `Web OFF`; the visible Web ON switch is next.
+- The route switch is session-persistent and captured with each buffered request;
+  durable persistence across bot restarts is not implemented yet.
 - Web search is disabled until a safe zero-cost provider contract is implemented.
 - The exact Gemma Ollama tag and 8K/32K/64K performance still need verification on
   the target Mac mini M4 with 16 GB unified memory.

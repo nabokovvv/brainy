@@ -5,7 +5,7 @@ import io
 import logging
 import re
 import tempfile
-from collections import namedtuple
+from dataclasses import dataclass
 from urllib.parse import unquote
 
 import telegram.error
@@ -25,7 +25,7 @@ from telegram.ext import (
 )
 
 import config
-from brainy_core import ProviderError, build_fast_chat_request
+from brainy_core import ProviderError, RouteIntent, build_fast_chat_request
 from brainy_core.providers import OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperTranscriber
@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------#
 ACTION_SHOW_LANGUAGES = "ACTION_SHOW_LANGUAGES"
 ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
+ACTION_TOGGLE_WEB = "ACTION_TOGGLE_WEB"
 
 # ---------------------------------------------------------------------------#
 #                         State and Request Queue                            #
@@ -59,11 +60,18 @@ ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
 user_message_buffers: dict[int, list[str]] = {}
 user_job_trackers: dict[int, "Job"] = {}
 user_last_update: dict[int, Update] = {}
+user_request_snapshots: dict[int, tuple[str, RouteIntent]] = {}
 
-Request = namedtuple(
-    "Request",
-    ["update", "context", "chat_id", "query", "language"],
-)
+
+@dataclass(frozen=True)
+class Request:
+    update: Update
+    context: ContextTypes.DEFAULT_TYPE
+    chat_id: int
+    query: str
+    language: str
+    route_intent: RouteIntent
+
 
 # ---------------------------------------------------------------------------#
 # Markdown V2 Escaping (final)
@@ -225,6 +233,34 @@ def get_all_languages_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyb
     return InlineKeyboardMarkup(keyboard)
 
 
+def _current_route_intent(context: ContextTypes.DEFAULT_TYPE) -> RouteIntent:
+    return RouteIntent.WEB if context.chat_data.get("web_enabled", False) else RouteIntent.LOCAL
+
+
+def get_route_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
+    translator = context.application.bot_data["translator"]
+    key = "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(translator.get_string(key, lang), callback_data=ACTION_TOGGLE_WEB)]]
+    )
+
+
+def _capture_request_snapshot(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    *,
+    language: str | None = None,
+    route_intent: RouteIntent | None = None,
+) -> None:
+    user_request_snapshots.setdefault(
+        chat_id,
+        (
+            language or context.chat_data.get("language", "en"),
+            route_intent or _current_route_intent(context),
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------#
 #                               Commands                                     #
 # ---------------------------------------------------------------------------#
@@ -242,9 +278,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = get_language_keyboard(context, user_lang)
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     else:
+        status_key = (
+            "web_status_on"
+            if _current_route_intent(context) is RouteIntent.WEB
+            else "web_status_off"
+        )
         await context.bot.send_message(
             chat_id=chat_id,
-            text=translator.get_string("mode_fast_reply", user_lang),
+            text=translator.get_string(status_key, user_lang),
+            reply_markup=get_route_keyboard(context, user_lang),
         )
 
 
@@ -267,12 +309,37 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     elif action.startswith(f"{ACTION_SET_LANGUAGE}_"):
         new_lang = action.replace(f"{ACTION_SET_LANGUAGE}_", "")
         context.chat_data["language"] = new_lang
-        text = translator.get_string("mode_fast_reply", new_lang)
-        await query.edit_message_text(text=text)
+        status_key = (
+            "web_status_on"
+            if _current_route_intent(context) is RouteIntent.WEB
+            else "web_status_off"
+        )
+        text = translator.get_string(status_key, new_lang)
+        await query.edit_message_text(
+            text=text,
+            reply_markup=get_route_keyboard(context, new_lang),
+        )
+
+    elif action == ACTION_TOGGLE_WEB:
+        context.chat_data["web_enabled"] = _current_route_intent(context) is RouteIntent.LOCAL
+        status_key = (
+            "web_status_on"
+            if _current_route_intent(context) is RouteIntent.WEB
+            else "web_status_off"
+        )
+        await query.edit_message_text(
+            text=translator.get_string(status_key, lang),
+            reply_markup=get_route_keyboard(context, lang),
+        )
 
     elif action in {"web", "deep_research", "fast_reply", "deep_search", "deepseek_r1"}:
-        # Old inline keyboards may survive a deploy. Collapse them to the only live path.
-        await query.edit_message_text(text=translator.get_string("mode_fast_reply", lang))
+        # Old inline keyboards may survive a deploy. Preserve their route intent.
+        context.chat_data["web_enabled"] = action in {"web", "deep_research", "deep_search"}
+        status_key = "web_status_on" if context.chat_data["web_enabled"] else "web_status_off"
+        await query.edit_message_text(
+            text=translator.get_string(status_key, lang),
+            reply_markup=get_route_keyboard(context, lang),
+        )
 
 
 # ---------------------------------------------------------------------------#
@@ -317,6 +384,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     lang = context.chat_data.get("language", "en")
+    route_intent = _current_route_intent(context)
     translator = context.application.bot_data["translator"]
 
     # Send an animated hourglass emoji as a status indicator
@@ -348,6 +416,12 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(chat_id, transcribed_text)
 
         # Add message to buffer and store the latest update object
+        _capture_request_snapshot(
+            context,
+            chat_id,
+            language=lang,
+            route_intent=route_intent,
+        )
         buffer = user_message_buffers.setdefault(chat_id, [])
         buffer.append(transcribed_text)
         user_last_update[chat_id] = update
@@ -438,25 +512,30 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
             context = request.context
             query = request.query
             lang = request.language
+            route_intent = request.route_intent
 
             llm_semaphore = context.application.bot_data["llm_semaphore"]
-            if llm_semaphore.locked():
+            if route_intent is RouteIntent.LOCAL and llm_semaphore.locked():
                 await update.message.reply_text(translator.get_string("waiting_in_queue", lang))
 
             logger.info(
-                "Worker %s processing chat=%s priority=%s",
+                "Worker %s processing chat=%s priority=%s route=%s",
                 name,
                 chat_id,
                 priority,
+                route_intent.value,
             )
 
-            # Start typing indicator
-            typing_task = asyncio.create_task(send_typing_periodically(context.bot, chat_id))
+            if route_intent is RouteIntent.LOCAL:
+                typing_task = asyncio.create_task(send_typing_periodically(context.bot, chat_id))
 
             chat_locks = app_data["chat_locks"]
             chat_lock = chat_locks.setdefault(chat_id, asyncio.Lock())
             async with chat_lock:
-                await fast_reply_handler(update, context, query, language=lang)
+                if route_intent is RouteIntent.WEB:
+                    await update.message.reply_text(translator.get_string("web_unavailable", lang))
+                else:
+                    await fast_reply_handler(update, context, query, language=lang)
 
         except asyncio.CancelledError:
             raise
@@ -499,6 +578,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     # Add message to buffer and store the latest update object
+    _capture_request_snapshot(context, chat_id)
     buffer = user_message_buffers.setdefault(chat_id, [])
     buffer.append(message_text)
     user_last_update[chat_id] = update
@@ -829,6 +909,7 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
     # Immediately retrieve and clear the user's data to avoid race conditions
     buffered_messages = user_message_buffers.pop(chat_id, [])
     last_update = user_last_update.pop(chat_id, None)
+    snapshot = user_request_snapshots.pop(chat_id, None)
     user_job_trackers.pop(chat_id, None)
 
     if not buffered_messages or not last_update:
@@ -836,7 +917,10 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     full_query_text = " ".join(buffered_messages)  # Join messages with a space
-    language = context.chat_data.get("language", "en")
+    language, route_intent = snapshot or (
+        context.chat_data.get("language", "en"),
+        _current_route_intent(context),
+    )
 
     logger.info(
         f"Processing buffered messages for chat {chat_id}. Total messages: {len(buffered_messages)}, Combined length: {len(full_query_text)}."
@@ -863,6 +947,7 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id=chat_id,
         query=full_query_text,
         language=language,
+        route_intent=route_intent,
     )
     await request_queue.put(priority, request)
 

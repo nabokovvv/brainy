@@ -177,10 +177,14 @@ spaCy/Wikidata/reranker/page utilities сохранены отдельным opt
 не импортируются fast path. Runtime оставляет один local chat path и Whisper.
 Forensic-аудит старых prompts/workflows закреплён в `LEGACY_QUALITY_AUDIT.md`:
 ценные механики доступны в Git и перенесены в Stage 2 как provider-neutral contracts.
-Следующий slice — явный `Web OFF/ON` intent без включения поиска до готовности Stage 2
-adapter.
+Явный `Web OFF/ON` intent реализован без запуска поиска: состояние сохраняется в
+`chat_data`, а route/language фиксируются при первом сообщении buffered request. Пока
+Stage 2 adapter отсутствует, Web snapshot отвечает локализованной unavailable-ошибкой
+и не подменяется local inference. Durable persistence между рестартами остаётся Stage
+4 задачей.
 
-- Заменить четыре режима одним чатом и явным persistent-переключателем `Web OFF/ON`; никакого LLM/freshness preflight.
+- [x] Заменить четыре режима одним чатом и явным session-persistent переключателем
+  `Web OFF/ON`; никакого LLM/freshness preflight.
 - Подключить установленную Gemma 4 E2B как benchmark baseline и зафиксировать точный Ollama tag на Mac.
 - Поддержать динамический контекст до 64K; измерить 8K/32K/64K и не отправлять лишний контекст без необходимости.
 - Реализовать Telegram progressive delivery через Bot API 10.1 Rich Messages/streaming с fallback на обычные entities/HTML.
