@@ -51,12 +51,11 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "Stage 3"):
             settings.validate()
 
-    def test_yandex_is_inert_until_stage_two(self) -> None:
+    def test_legacy_yandex_backend_is_removed(self) -> None:
         settings = Settings.from_env({"SEARCH_BACKEND": "yandex"})
-        settings.validate(require_web=False)
 
-        with self.assertRaisesRegex(ConfigurationError, "Stage 2 zero-cost adapter"):
-            settings.validate(require_web=True)
+        with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND.*Stage 2"):
+            settings.validate(require_web=False)
 
     def test_context_supports_owner_confirmed_64k_limit(self) -> None:
         settings = Settings.from_env({"OLLAMA_CONTEXT_TOKENS": "65536"})
@@ -100,7 +99,7 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND.*Stage 2"):
             settings.validate()
 
-    def test_invalid_dormant_legacy_numbers_do_not_break_local_import(self) -> None:
+    def test_removed_legacy_environment_knobs_do_not_break_local_import(self) -> None:
         env = os.environ.copy()
         env.update(
             {

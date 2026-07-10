@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import torch
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from page_processor import TextChunk
 import logging
 
 logger = logging.getLogger(__name__)
+MAX_RERANK_CHUNKS = 64
+MAX_QUERY_CHARS = 2_000
+MAX_CHUNK_CHARS = 4_000
 
 class Reranker:
     def __init__(self, model_name):
@@ -22,15 +26,26 @@ class Reranker:
         self.model = SentenceTransformer(model_name, device=device)
 
     def rerank(self, query: str, chunks: list, top_n: int, threshold: float = 0.0) -> list:
-        if not chunks:
+        if not chunks or top_n <= 0:
             return []
-        query_embedding = self.model.encode([query])
-        chunk_embeddings = self.model.encode([chunk.text for chunk in chunks])
+        candidates = chunks[:MAX_RERANK_CHUNKS]
+        query_embedding = self.model.encode(
+            [query[:MAX_QUERY_CHARS]],
+            show_progress_bar=False,
+        )
+        chunk_embeddings = self.model.encode(
+            [chunk.text[:MAX_CHUNK_CHARS] for chunk in candidates],
+            show_progress_bar=False,
+        )
 
         similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
 
         ranked_chunks = sorted(
-            [(chunk, sim) for chunk, sim in zip(chunks, similarities) if sim >= threshold],
+            [
+                (chunk, sim)
+                for chunk, sim in zip(candidates, similarities)
+                if sim >= threshold
+            ],
             key=lambda x: x[1],
             reverse=True
         )

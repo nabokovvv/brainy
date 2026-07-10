@@ -13,20 +13,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Kept separate until the Stage 2 search contract replaces the legacy web path.
-web = [
+# Dormant research tools. They are preserved for the future Web ON path but are not
+# imported or installed by the local fast-chat runtime.
+research = [
     "aiohttp>=3.12,<4",
     "beautifulsoup4>=4.13,<5",
-    "nltk>=3.9,<4",
-]
-# Compatibility only while old deep modes are being characterized and removed.
-# Installing this group does not authorize calls to paid or quota-bearing services.
-legacy = [
-    "py3langid>=0.3,<1",
     "scikit-learn>=1.7,<2",
     "sentence-transformers>=5,<6",
     "spacy>=3.8,<4",
-    "together>=1.5,<2",
 ]
 
 [dependency-groups]

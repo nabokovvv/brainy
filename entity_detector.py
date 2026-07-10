@@ -1,5 +1,13 @@
-import spacy
+from __future__ import annotations
+
+import logging
 import re
+import threading
+
+import spacy
+
+
+logger = logging.getLogger(__name__)
 
 # A regex to find leading conjunctions and similar words in different languages
 # Covers: and, y, und, et, и, serta, dan, ve, etc.
@@ -19,20 +27,20 @@ LANG_MODEL_MAP = {
 
 # Cache loaded NLP models
 _nlp_models = {}
+_model_load_lock = threading.Lock()
 
 def load_nlp_model(lang: str):
     """Loads and caches the spaCy NLP model for the given language."""
     model_name = LANG_MODEL_MAP.get(lang, "xx_ent_wiki_sm") # Fallback to multilingual
 
     if model_name not in _nlp_models:
-        try:
-            _nlp_models[model_name] = spacy.load(model_name)
-        except OSError:
-            print(f"\n{'-'*60}")
-            print(f"ERROR: SpaCy model '{model_name}' not found.")
-            print(f"Please install it by running: python -m spacy download {model_name}")
-            print(f"{'-'*60}\n")
-            raise
+        with _model_load_lock:
+            if model_name not in _nlp_models:
+                try:
+                    _nlp_models[model_name] = spacy.load(model_name)
+                except OSError:
+                    logger.warning("spaCy model unavailable model=%s", model_name)
+                    raise RuntimeError(f"spaCy model is not installed: {model_name}") from None
     return _nlp_models[model_name]
 
 def _clean_entity_text(text: str) -> str:

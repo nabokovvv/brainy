@@ -94,26 +94,3 @@ def strip_think(text: str) -> str:
     # 3) Убираем одиночные открывающие теги, если вдруг остались
     text = _THINK_OPEN.sub("", text)
     return text.strip()
-
-
-def detect_language(text: str) -> str:
-    """Detects the language of the given text using py3langid."""
-    import py3langid
-
-    lang, _ = py3langid.classify(text)
-    return lang
-
-def _filter_duplicate_chunks(chunks: list) -> list:
-    """Filters out duplicate chunks based on their text content."""
-    seen_texts = set()
-    unique_chunks = []
-    for chunk in chunks:
-        # This check assumes chunk has a .text attribute.
-        # It might need to be adapted if chunks are of different types.
-        if hasattr(chunk, 'text') and chunk.text not in seen_texts:
-            seen_texts.add(chunk.text)
-            unique_chunks.append(chunk)
-        elif isinstance(chunk, dict) and chunk.get('text') not in seen_texts:
-            seen_texts.add(chunk['text'])
-            unique_chunks.append(chunk)
-    return unique_chunks

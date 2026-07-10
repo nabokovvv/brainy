@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import httpx
 import json
 import logging
 import asyncio
+import re
+
 import config
 
 logger = logging.getLogger(__name__)
@@ -74,9 +78,23 @@ SPACY_LABEL_TO_WIKIDATA_P31 = {
 
 # Scientific Q-IDs that get boosted scoring
 SCIENTIFIC_QIDS = {"Q12136", "Q16521", "Q11173", "Q7187", "Q483247"}
+QID_PATTERN = re.compile(r"^Q[1-9]\d*$")
+LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$")
+
+
+def _escape_sparql_literal(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
 
 async def _get_p31_for_qid(client: httpx.AsyncClient, qid: str) -> list[str]:
     """Fetches P31 (instance of) values for a given QID with controlled P279 depth."""
+    if not QID_PATTERN.fullmatch(qid):
+        return []
     # Use limited P279 depth to prevent over-matching through distant ontological relationships
     max_depth = config.P279_MAX_DEPTH
     
@@ -114,11 +132,11 @@ async def _get_p31_for_qid(client: httpx.AsyncClient, qid: str) -> list[str]:
             data = response.json()
             bindings = data.get('results', {}).get('bindings', [])
             return [b['type']['value'].split('/')[-1] for b in bindings]
-        except httpx.RequestError as e:
-            logger.error(f"Error fetching P31 for QID {qid}: {e}")
+        except httpx.RequestError as exc:
+            logger.warning("Wikidata P31 request failed qid=%s type=%s", qid, type(exc).__name__)
             return []
         except json.JSONDecodeError:
-            logger.error(f"Failed to decode JSON from Wikidata for P31 of QID {qid}. Response: {response.text}")
+            logger.warning("Wikidata P31 returned invalid JSON qid=%s", qid)
             return []
 
 def _get_priority_tier(p31_values: list[str], spacy_label: str) -> tuple[str | None, list[str]]:
@@ -196,12 +214,21 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
     Returns:
         Best matching Q-ID or None if not found
     """
+    normalized_search = search_term.strip()
+    if (
+        not normalized_search
+        or len(normalized_search) > 256
+        or not LANGUAGE_PATTERN.fullmatch(lang)
+    ):
+        return None
+    escaped_search = _escape_sparql_literal(normalized_search)
+
     # Enhanced query to fetch sitelinks count along with Q-IDs
     query = f'''SELECT ?item ?sitelinks WHERE {{
   SERVICE wikibase:mwapi {{
     bd:serviceParam wikibase:api "EntitySearch" .
     bd:serviceParam wikibase:endpoint "www.wikidata.org" .
-    bd:serviceParam mwapi:search "{search_term}" .
+    bd:serviceParam mwapi:search "{escaped_search}" .
     bd:serviceParam mwapi:language "{lang}" .
     ?item wikibase:apiOutputItem mwapi:item .
   }}
@@ -213,8 +240,6 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
         'Accept': 'application/sparql-results+json'
     }
 
-    logger.info(f"Querying Wikidata for entity '{search_term}' (lang: {lang}, spacy_label: {spacy_label})")
-    
     try:
         response = await client.get(WIKIDATA_SPARQL_ENDPOINT, headers=headers, params={'query': query})
         response.raise_for_status()
@@ -223,7 +248,7 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
         bindings = data.get('results', {}).get('bindings', [])
         
         if not bindings:
-            logger.warning(f"Could not find Q-ID for entity: {search_term} in language: {lang} with spacy_label: {spacy_label}")
+            logger.debug("Wikidata entity candidates count=0 language=%s", lang)
             return None
 
         # Extract candidates with sitelinks
@@ -237,15 +262,15 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
                 candidates.append({'qid': qid, 'sitelinks': sitelinks})
         
         if not candidates:
-            logger.warning(f"No valid candidates found for entity: {search_term}")
+            logger.debug("Wikidata valid candidates count=0 language=%s", lang)
             return None
         
-        logger.info(f"Retrieved {len(candidates)} candidates for '{search_term}': {[(c['qid'], c['sitelinks']) for c in candidates]}")
+        logger.info("Wikidata candidates count=%s language=%s", len(candidates), lang)
 
         # If no spacy_label provided, return the most popular candidate (highest sitelinks)
         if not spacy_label or spacy_label not in SPACY_LABEL_TO_WIKIDATA_P31:
             best_candidate = max(candidates, key=lambda x: x['sitelinks'])
-            logger.info(f"Mapped entity '{search_term}' to Q-ID: {best_candidate['qid']} (no P31 filter, highest sitelinks: {best_candidate['sitelinks']})")
+            logger.info("Wikidata entity selected qid=%s tier=unfiltered", best_candidate['qid'])
             return best_candidate['qid']
         
         # Fetch P31 values and score all candidates
@@ -274,10 +299,9 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
             
             # Log candidate details
             if priority_tier:
-                logger.info(f"Candidate {qid}: P31 values {matched_p31_qids}, priority tier {priority_tier}")
-                logger.debug(f"Candidate {qid} score: {score} (priority={priority_tier}, sitelinks={sitelinks})")
+                logger.debug("Wikidata candidate qid=%s tier=%s", qid, priority_tier)
             else:
-                logger.debug(f"Candidate {qid}: No P31 match, sitelinks={sitelinks}")
+                logger.debug("Wikidata candidate qid=%s tier=none", qid)
         
         # Sort by score (descending)
         scored_candidates.sort(key=lambda x: x['score'], reverse=True)
@@ -289,16 +313,14 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
         high_priority_candidates = [c for c in scored_candidates if c['priority_tier'] == 'high']
         if high_priority_candidates:
             best_candidate = high_priority_candidates[0]
-            logger.info(f"Selected {best_candidate['qid']} for '{search_term}': score={best_candidate['score']:.1f}, "
-                       f"type={best_candidate['matched_p31_qids']}, sitelinks={best_candidate['sitelinks']} (high priority)")
+            logger.info("Wikidata entity selected qid=%s tier=high", best_candidate['qid'])
             return best_candidate['qid']
         
         # Try to find medium-priority match
         medium_priority_candidates = [c for c in scored_candidates if c['priority_tier'] == 'medium']
         if medium_priority_candidates:
             best_candidate = medium_priority_candidates[0]
-            logger.info(f"Selected {best_candidate['qid']} for '{search_term}': score={best_candidate['score']:.1f}, "
-                       f"type={best_candidate['matched_p31_qids']}, sitelinks={best_candidate['sitelinks']} (medium priority)")
+            logger.info("Wikidata entity selected qid=%s tier=medium", best_candidate['qid'])
             return best_candidate['qid']
         
         # Try to find low-priority match with sufficient sitelinks
@@ -306,8 +328,7 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
                                   if c['priority_tier'] == 'low' and c['sitelinks'] >= config.MIN_SITELINKS_LOW_PRIORITY]
         if low_priority_candidates:
             best_candidate = low_priority_candidates[0]
-            logger.info(f"Selected {best_candidate['qid']} for '{search_term}': score={best_candidate['score']:.1f}, "
-                       f"type={best_candidate['matched_p31_qids']}, sitelinks={best_candidate['sitelinks']} (low priority)")
+            logger.info("Wikidata entity selected qid=%s tier=low", best_candidate['qid'])
             return best_candidate['qid']
         
         # Fallback: return highest-sitelinks candidate if it meets minimum threshold
@@ -316,26 +337,24 @@ async def get_qid_from_entity(client: httpx.AsyncClient, search_term: str, lang:
             # Sort by sitelinks for fallback
             fallback_candidates.sort(key=lambda x: x['sitelinks'], reverse=True)
             best_candidate = fallback_candidates[0]
-            logger.warning(f"No P31 match for '{search_term}', using highest-sitelinks result: {best_candidate['qid']} "
-                          f"(sitelinks={best_candidate['sitelinks']})")
+            logger.info("Wikidata entity selected qid=%s tier=fallback", best_candidate['qid'])
             return best_candidate['qid']
         
         # Last resort: return most popular candidate even if below threshold
         if scored_candidates:
             best_candidate = max(scored_candidates, key=lambda x: x['sitelinks'])
-            logger.warning(f"All candidates below threshold for '{search_term}', returning best available: {best_candidate['qid']} "
-                          f"(sitelinks={best_candidate['sitelinks']})")
+            logger.info("Wikidata entity selected qid=%s tier=last-resort", best_candidate['qid'])
             return best_candidate['qid']
         
-        logger.warning(f"Could not find suitable Q-ID for entity: {search_term}")
+        logger.debug("No suitable Wikidata entity language=%s", lang)
         return None
 
-    except httpx.RequestError as e:
-        logger.error(f"Error querying Wikidata for entity '{search_term}': {e}")
+    except httpx.RequestError as exc:
+        logger.warning("Wikidata entity request failed type=%s", type(exc).__name__)
     except json.JSONDecodeError:
-        logger.error(f"Failed to decode JSON from Wikidata for entity '{search_term}'. Response: {response.text}")
-    except Exception as e:
-        logger.error(f"Unexpected error in get_qid_from_entity for '{search_term}': {e}", exc_info=True)
+        logger.warning("Wikidata entity response was invalid JSON")
+    except Exception as exc:
+        logger.warning("Wikidata entity lookup failed type=%s", type(exc).__name__)
 
-    logger.warning(f"Could not find Q-ID for entity: {search_term} in language: {lang} with spacy_label: {spacy_label}")
+    logger.debug("Wikidata entity lookup returned no result language=%s", lang)
     return None

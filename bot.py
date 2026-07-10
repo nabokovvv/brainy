@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import re
 import asyncio
-import importlib
 from collections import namedtuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -19,9 +18,6 @@ from telegram.ext import (
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 import telegram.error
-import os
-import textwrap
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import config
 
@@ -38,41 +34,15 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Remote providers remain unreachable until Stage 3 can prove price=0 and enforce quotas.
-llm_client = None
 logger.info("Using local Ollama provider")
 
 from localization import Translator
-from utils import _filter_duplicate_chunks, strip_think
+from utils import strip_think
 from brainy_core import ProviderError, build_fast_chat_request
 from brainy_core.providers import OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperTranscriber
 
-page_processor = None
-reranker = None
-search_client = None
-xml_parser = None
-entity_lookup = None
-
-
-def _load_legacy_web_modules() -> None:
-    """Load the old web stack only when an explicitly enabled path needs it."""
-
-    global page_processor, reranker, search_client, xml_parser, entity_lookup
-    if page_processor is not None:
-        return
-    page_processor = importlib.import_module("page_processor")
-    reranker = importlib.import_module("reranker")
-    search_client = importlib.import_module("search_client")
-    xml_parser = importlib.import_module("xml_parser")
-    entity_lookup = importlib.import_module("entity_lookup")
-
-
-def _require_legacy_llm_client():
-    if llm_client is None:
-        raise RuntimeError("Legacy deep/web LLM pipeline is disabled for the local provider")
-    return llm_client
 import tempfile
 from urllib.parse import unquote
 
@@ -84,7 +54,6 @@ from urllib.parse import unquote
 # ---------------------------------------------------------------------------#
 #                               Constants                                  #
 # ---------------------------------------------------------------------------#
-ACTION_CHANGE_MODE = "ACTION_CHANGE_MODE"
 ACTION_SHOW_LANGUAGES = "ACTION_SHOW_LANGUAGES"
 ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
 
@@ -97,7 +66,7 @@ user_last_update: dict[int, Update] = {}
 
 Request = namedtuple(
     "Request",
-    ["update", "context", "chat_id", "query", "mode", "language"],
+    ["update", "context", "chat_id", "query", "language"],
 )
 
 # ---------------------------------------------------------------------------#
@@ -112,7 +81,6 @@ _NUMERIC_MARK  = re.compile(r'^( *\d+)(\.)(\s+)', re.MULTILINE)        # "1. "
 _CODE_SPLIT    = re.compile(r'(```.*?```|`[^`]*`)', re.S)              # тройной/инлайн код
 _HEADING_LINE  = re.compile(r'^(?:\s*#+\s*)+(?P<txt>\S[^\n]*)\s*$', re.MULTILINE)
 _URL_IN_PARENS = re.compile(r'\((https?://[^)\s]+)\)')
-_LINK_RE    = re.compile(r'(\[[^\]]+\])\((https?://[^)\s]+)\)')  # [text](url)
 _UNINDENT = re.compile(r'(?m)^(?![ \t]*(?:[-+*]|\d+\.|>))\s{2,}(?=\S)')
 _UNINDENT_MARKERS = re.compile(r'(?m)^[ \t]+(?=(?:[-+*]\s|\d+\\\.\s|>))')
 
@@ -163,7 +131,7 @@ def escape_markdown_v2(text: str) -> str:
 
         # источники "1. https://..." -> читаемая ссылка
         def _src_repl(m):
-            n, url = m.group(1), m.group(2)
+            url = m.group(2)
             link_target = url.replace(')', r'\)').replace('(', r'\(')
             link_text = unquote(url)
             return f"{PH_LB}{link_text}{PH_RB}{PH_LP}{link_target}{PH_RP}"
@@ -207,47 +175,6 @@ def escape_markdown_v2(text: str) -> str:
         parts[i] = seg
 
     return ''.join(parts)
-# ---------------------------------------------------------------------------#
-#                           Keyboard Generators                              #
-# ---------------------------------------------------------------------------#
-def get_mode_keyboard(context: ContextTypes.DEFAULT_TYPE, chat_id: int, lang: str) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data['translator']
-    if not config.WEB_ENABLED_DEFAULT:
-        context.chat_data['mode'] = 'fast_reply'
-    mode_key = context.chat_data.get('mode', 'fast_reply')
-    mode_name = translator.get_string(f"mode_{mode_key}", lang)
-    if not config.WEB_ENABLED_DEFAULT:
-        return InlineKeyboardMarkup(
-            [[InlineKeyboardButton(mode_name, callback_data="noop")]]
-        )
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(translator.get_string("current_mode_button", lang, mode_name=mode_name), callback_data="noop"),
-                InlineKeyboardButton(translator.get_string("change_mode_button_text", lang), callback_data=ACTION_CHANGE_MODE),
-            ]
-        ]
-    )
-
-def get_full_mode_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data['translator']
-    if not config.WEB_ENABLED_DEFAULT:
-        return InlineKeyboardMarkup(
-            [[InlineKeyboardButton(translator.get_string("mode_fast_reply", lang), callback_data="fast_reply")]]
-        )
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(translator.get_string("mode_web", lang), callback_data="web"),
-                InlineKeyboardButton(translator.get_string("mode_deep_research", lang), callback_data="deep_research"),
-            ],
-            [
-                InlineKeyboardButton(translator.get_string("mode_fast_reply", lang), callback_data="fast_reply"),
-                InlineKeyboardButton(translator.get_string("mode_deep_search", lang), callback_data="deep_search"),
-            ]
-        ]
-    )
-
 def get_language_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
     translator = context.application.bot_data['translator']
     return InlineKeyboardMarkup(
@@ -284,14 +211,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = get_language_keyboard(context, user_lang)
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     else:
-        await show_mode_menu(context, chat_id)
-
-async def show_mode_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
-    lang = context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
-    text = translator.get_string("choose_your_mode", lang)
-    keyboard = get_mode_keyboard(context, chat_id, lang)
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=translator.get_string("mode_fast_reply", user_lang),
+        )
 
 # ---------------------------------------------------------------------------#
 #                       Button Callback Handler                              #
@@ -300,39 +223,24 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
 
-    chat_id = query.message.chat.id
     translator = context.application.bot_data['translator']
     action = query.data
 
     lang = context.chat_data.get('language', 'en')
 
-    if action == ACTION_CHANGE_MODE:
-        try:
-            await query.edit_message_reply_markup(get_full_mode_keyboard(context, lang))
-        except telegram.error.BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass  # Ignore if the keyboard is already what we want it to be.
-            else:
-                raise # Re-raise other bad request errors.
-    
-    elif action in ["web", "deep_research", "fast_reply", "deep_search", "deepseek_r1"]:
-        if action != "fast_reply" and not config.WEB_ENABLED_DEFAULT:
-            context.chat_data['mode'] = 'fast_reply'
-            await query.edit_message_reply_markup(get_mode_keyboard(context, chat_id, lang))
-            return
-        context.chat_data['mode'] = action
-        await query.edit_message_reply_markup(get_mode_keyboard(context, chat_id, lang))
-
-    elif action == ACTION_SHOW_LANGUAGES:
+    if action == ACTION_SHOW_LANGUAGES:
         text = translator.get_string("language_selection_prompt", lang)
         await query.edit_message_text(text=text, reply_markup=get_all_languages_keyboard(context))
 
     elif action.startswith(f"{ACTION_SET_LANGUAGE}_"):
         new_lang = action.replace(f"{ACTION_SET_LANGUAGE}_", "")
         context.chat_data['language'] = new_lang
-        text = translator.get_string("choose_your_mode", new_lang)
-        keyboard = get_mode_keyboard(context, chat_id, new_lang)
-        await query.edit_message_text(text=text, reply_markup=keyboard)
+        text = translator.get_string("mode_fast_reply", new_lang)
+        await query.edit_message_text(text=text)
+
+    elif action in {"web", "deep_research", "fast_reply", "deep_search", "deepseek_r1"}:
+        # Old inline keyboards may survive a deploy. Collapse them to the only live path.
+        await query.edit_message_text(text=translator.get_string("mode_fast_reply", lang))
 
 # ---------------------------------------------------------------------------#
 #                         Request Handlers                                   #
@@ -367,326 +275,6 @@ def _clean_text_for_plain_send(text: str) -> str:
 
     return cleaned_text
 
-
-async def fast_web_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    query: str,
-    *,
-    language: str | None = None,
-):
-    _load_legacy_web_modules()
-    legacy_llm = _require_legacy_llm_client()
-    lang = language or context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
-    llm_semaphore = context.application.bot_data["llm_semaphore"]
-    ranker = context.application.bot_data["reranker"] # Use shared reranker
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    try:
-        searcher = search_client.SearchClient(
-            config.SEARCH_BACKEND, config.YANDEX_API_KEY
-        )
-        xml_results = await searcher.search(query, num_results=12)
-        yandex_raw = await asyncio.to_thread(xml_parser.parse_yandex_xml, xml_results)
-
-        if not yandex_raw:
-            # Fallback to fast reply if no snippets
-            async with llm_semaphore:
-                final_answer = await legacy_llm.prompt_without_context(query, lang)
-            
-            final_answer = re.sub(r"<think>.*?</think>", "", final_answer, flags=re.S | re.I).strip()
-            telegram_text = escape_markdown_v2(final_answer)
-            await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
-            await show_mode_menu(context, update.effective_chat.id)
-            return
-
-        yandex_chunks = [
-            page_processor.TextChunk(text=c.text, source_url=c.url, index=i)
-            for i, c in enumerate(yandex_raw)
-        ]
-
-        top_chunks = await asyncio.to_thread(
-            ranker.rerank, # Use shared ranker
-            query,
-            yandex_chunks,
-            top_n=config.TOP_N,
-            threshold=config.RERANK_THRESHOLD,
-        )
-
-        if not top_chunks:
-            # Fallback to fast reply if no snippets
-            async with llm_semaphore:
-                final_answer = await legacy_llm.prompt_without_context(query, lang)
-            
-            final_answer = re.sub(r"<think>.*?</think>", "", final_answer, flags=re.S | re.I).strip()
-            telegram_text = escape_markdown_v2(final_answer)
-            await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
-            await show_mode_menu(context, update.effective_chat.id)
-            return
-
-        entities_info = await entity_lookup.get_entity_info(query, lang)
-        logger.info(f"Discovered entities: {entities_info}")
-
-        async with llm_semaphore:
-            final_answer = await legacy_llm.generate_answer_from_serp(query, top_chunks, lang, translator, entities_info)
-
-        final_answer = re.sub(r"<think>.*?</think>", "", final_answer, flags=re.S | re.I).strip()
-        telegram_text = escape_markdown_v2(final_answer)
-        await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
-        await show_mode_menu(context, update.effective_chat.id)
-
-    except Exception as e:
-        logger.error("Error in Fast Web mode:", exc_info=True)
-        await update.message.reply_text(translator.get_string("error_generic", lang))
-        await show_mode_menu(context, update.effective_chat.id)
-
-async def deep_search_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    query: str,
-    *,
-    language: str | None = None,
-):
-    _load_legacy_web_modules()
-    legacy_llm = _require_legacy_llm_client()
-    lang = language or context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
-    llm_semaphore = context.application.bot_data["llm_semaphore"]
-    ranker = context.application.bot_data["reranker"] # Use shared reranker
-
-    await update.message.reply_text(translator.get_string("deep_search_start_message", lang))
-    context.chat_data['mode'] = 'fast_reply'
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    try:
-        async with llm_semaphore:
-            entities_info = await entity_lookup.get_entity_info(query, lang)
-            logger.info(f"Discovered entities for deep search: {entities_info}")
-            sub_queries = await legacy_llm.get_sub_queries(query, lang)
-        searcher = search_client.SearchClient(
-            config.SEARCH_BACKEND, config.YANDEX_API_KEY
-        )
-
-        all_reranked_chunks_by_query = []
-        all_processed_urls = set()
-
-        for sub_query in sub_queries:
-            await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-            xml_results = await searcher.search(sub_query)
-            yandex_raw = await asyncio.to_thread(xml_parser.parse_yandex_xml, xml_results)
-
-            if not yandex_raw:
-                continue
-
-            yandex_chunks = [
-                page_processor.TextChunk(text=c.text, source_url=c.url, index=i)
-                for i, c in enumerate(yandex_raw)
-            ]
-            
-            # Fetch content from new URLs
-            urls_to_fetch = {c.url for c in yandex_raw} - all_processed_urls
-            web_page_chunks = await page_processor.fetch_and_process_pages(list(urls_to_fetch))
-            all_processed_urls.update(urls_to_fetch)
-
-            all_chunks_for_sub_query = yandex_chunks + web_page_chunks
-
-            top_chunks_for_sub_query = await asyncio.to_thread(
-                ranker.rerank, # Use shared ranker
-                sub_query, # Rerank against the specific sub-query
-                all_chunks_for_sub_query,
-                top_n=config.TOP_N, # Keep a good number of chunks per sub-query
-                threshold=config.RERANK_THRESHOLD,
-            )
-
-            if top_chunks_for_sub_query:
-                all_reranked_chunks_by_query.append({
-                    "query": sub_query,
-                    "snippets": top_chunks_for_sub_query
-                })
-
-        if not all_reranked_chunks_by_query:
-            # Fallback to fast reply if no snippets found for any sub-query
-            await update.message.reply_text(
-                translator.get_string("error_no_context", lang) + " " + translator.get_string("trying_fast_reply", lang)
-            )
-            async with llm_semaphore:
-                final_answer = await legacy_llm.prompt_without_context(
-                    query,
-                    lang,
-                    model=config.DEEP_SEARCH_STEP_SIX_MODEL,
-                    params=config.CREATIVE_PARAMS,
-                )
-            top_sources = []
-        else:
-            await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-            async with llm_semaphore:
-                final_answer = await legacy_llm.synthesize_answer(query, all_reranked_chunks_by_query, lang, entities_info)
-
-            # Get top 5 unique source URLs from all reranked chunks
-            top_sources = []
-            seen_urls = set()
-            for result in all_reranked_chunks_by_query:
-                for chunk in result['snippets']:
-                    if chunk.source_url not in seen_urls:
-                        top_sources.append(chunk.source_url)
-                        seen_urls.add(chunk.source_url)
-                        if len(top_sources) >= 5:
-                            break
-                if len(top_sources) >= 5:
-                    break
-        
-        # Append sources if available
-        if top_sources:
-            sources_label = translator.get_string("sources_label", lang)
-            sources_text = "\n".join([f"{i+1}. {unquote(url)}" for i, url in enumerate(top_sources)])
-            final_answer += f"\n\n{sources_label}:\n{sources_text}"
-
-        final_answer = re.sub(r"<think>.*?</think>", "", final_answer, flags=re.S).strip()
-
-        telegram_text = escape_markdown_v2(final_answer)
-
-        await send_long_message(
-            update,
-            telegram_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
-            disable_web_page_preview=True,
-        )
-        context.chat_data['mode'] = 'fast_reply'
-        await show_mode_menu(context, update.effective_chat.id)
-    except Exception as e:
-        logger.error("Error in Deep Search:", exc_info=True)
-        await update.message.reply_text(translator.get_string("error_generic", lang))
-        await show_mode_menu(context, update.effective_chat.id)
-
-async def deep_research_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    query: str,
-    *,
-    language: str | None = None,
-):
-    _load_legacy_web_modules()
-    legacy_llm = _require_legacy_llm_client()
-    lang = language or context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
-    llm_semaphore = context.application.bot_data["llm_semaphore"]
-    ranker = context.application.bot_data["reranker"] # Use shared reranker
-    
-    await update.message.reply_text(translator.get_string("deep_research_start_message", lang))
-    context.chat_data['mode'] = 'fast_reply'
-    await show_mode_menu(context, update.effective_chat.id) # Show keyboard immediately
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    try:
-        async with llm_semaphore:
-            entities_info = await entity_lookup.get_entity_info(query, lang)
-            logger.info(f"Discovered entities for initial query: {entities_info}")
-            steps = await legacy_llm.get_research_steps(query, lang, entities_info)
-        if not steps:
-            await update.message.reply_text(translator.get_string("error_no_steps", lang))
-            return
-
-        research_data: dict[str, str] = {}
-        all_top_sources = set() # Initialize a set to collect all unique sources
-        for step in steps:
-            await context.bot.send_chat_action(
-                update.effective_chat.id, ChatAction.TYPING
-            )
-
-            async with llm_semaphore:
-                sub_queries = await legacy_llm.get_sub_queries(step, lang)
-            searcher = search_client.SearchClient(
-                search_backend=config.SEARCH_BACKEND,
-                api_key=config.YANDEX_API_KEY,
-            )
-
-            xml_results = []
-            for q in sub_queries:
-                xml_result = await searcher.search(q)
-                xml_results.append(xml_result)
-
-            yandex_raw_chunks = []
-            for xml in xml_results:
-                parsed_chunks = await asyncio.to_thread(
-                    xml_parser.parse_yandex_xml, xml
-                )
-                yandex_raw_chunks.extend(parsed_chunks)
-
-            yandex_chunks = [
-                page_processor.TextChunk(text=c.text, source_url=c.url, index=i)
-                for i, c in enumerate(yandex_raw_chunks)
-            ]
-            urls = list({c.url for c in yandex_raw_chunks})
-            web_page_chunks = await page_processor.fetch_and_process_pages(urls)
-            all_chunks = yandex_chunks + web_page_chunks
-
-            top_chunks = await asyncio.to_thread(
-                ranker.rerank, # Use shared ranker
-                step,
-                all_chunks,
-                top_n=config.TOP_N,
-                threshold=config.RERANK_THRESHOLD,
-            )
-
-            # Filter out duplicate chunks
-            unique_top_chunks = _filter_duplicate_chunks(top_chunks)
-
-            # Collect sources for the final output
-            for chunk in unique_top_chunks:
-                all_top_sources.add(chunk.source_url)
-
-            if unique_top_chunks:
-                # Discover entities for the current research step
-                entities_info_step = await entity_lookup.get_entity_info(step, lang)
-                logger.info(f"Discovered entities for step '{step}': {entities_info_step}")
-
-                # Generate summary for the current research step
-                async with llm_semaphore:
-                    summary = await legacy_llm.generate_summary_from_chunks(
-                        step, unique_top_chunks, lang, translator, entities_info_step
-                    )
-                research_data[step] = summary
-
-        if not research_data:
-            await update.message.reply_text(translator.get_string("error_no_context", lang))
-            return
-
-        # Join all research items and their content together
-        joined_research_items = ""
-        for step, summary in research_data.items():
-            joined_research_items += f"\n\n## {step}\n"
-            joined_research_items += summary
-
-        # --- New Map-Reduce Workflow ---
-        # 1. Split the combined research data into manageable chunks
-        chunk_size = 6000
-        chunks = textwrap.wrap(joined_research_items, chunk_size, break_long_words=False, replace_whitespace=False)
-        logger.info(f"Split research data into {len(chunks)} chunks for summarization.")
-
-        # 2. Summarize each chunk sequentially to respect rate limits (Map step)
-        valid_summaries = []
-        for chunk in chunks:
-            summary = await legacy_llm.summarize_research_chunk(chunk, query, lang)
-            if summary:
-                valid_summaries.append(summary)
-        logger.info(f"Generated {len(valid_summaries)} summaries from chunks.")
-
-        # 3. Synthesize the final answer from the summaries (Reduce step)
-        async with llm_semaphore:
-            final_answer = await legacy_llm.polish_research_answer("\n\n".join(valid_summaries), query, lang, translator)
-        
-        telegram_text = escape_markdown_v2(final_answer)
-
-        await send_long_message(
-            update,
-            telegram_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
-            disable_web_page_preview=True,
-        )
-        context.chat_data['mode'] = 'fast_reply'
-        await show_mode_menu(context, update.effective_chat.id)
-    except Exception as e:
-        logger.error("Error in Deep Research:", exc_info=True)
-        await update.message.reply_text(translator.get_string("error_generic", lang))
-        await show_mode_menu(context, update.effective_chat.id)
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
@@ -756,36 +344,18 @@ async def fast_reply_handler(
 
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     try:
+        provider = context.application.bot_data.get("inference_provider")
+        if provider is None:
+            raise RuntimeError("Inference provider is not configured")
         async with llm_semaphore:
-            provider = context.application.bot_data.get("inference_provider")
-            if provider is not None:
-                result = await provider.chat(build_fast_chat_request(query, lang))
-                final_answer = result.text
-                logger.info(
-                    "Fast reply completed provider=%s model=%s latency_ms=%.1f",
-                    result.model.provider,
-                    result.model.name,
-                    result.latency_ms,
-                )
-            else:
-                legacy_llm = _require_legacy_llm_client()
-                translated_mode_names = {
-                    "fast_reply": translator.get_string("mode_fast_reply", lang),
-                    "web_search": translator.get_string("mode_web", lang),
-                    "deep_search": translator.get_string("mode_deep_search", lang),
-                    "deep_research": translator.get_string("mode_deep_research", lang),
-                }
-                available_modes = [
-                    translated_mode_names["web_search"],
-                    translated_mode_names["deep_search"],
-                    translated_mode_names["deep_research"],
-                ]
-                final_answer = await legacy_llm.fast_reply(
-                    query,
-                    lang,
-                    available_modes,
-                    translated_mode_names,
-                )
+            result = await provider.chat(build_fast_chat_request(query, lang))
+            final_answer = result.text
+            logger.info(
+                "Fast reply completed provider=%s model=%s latency_ms=%.1f",
+                result.model.provider,
+                result.model.name,
+                result.latency_ms,
+            )
         
         final_answer = re.sub(r"<think>.*?</think>", "", final_answer, flags=re.S | re.I).strip()
         
@@ -796,43 +366,12 @@ async def fast_reply_handler(
         telegram_text = escape_markdown_v2(final_answer)
 
         await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
-        await show_mode_menu(context, update.effective_chat.id)
     except ProviderError as exc:
         logger.warning("Fast reply provider failure code=%s", exc.code.value)
         await update.message.reply_text(translator.get_string("error_generic", lang))
-        await show_mode_menu(context, update.effective_chat.id)
-    except Exception:
-        logger.error("Error in Fast Reply mode:", exc_info=True)
+    except Exception as exc:
+        logger.error("Fast reply failed type=%s", type(exc).__name__)
         await update.message.reply_text(translator.get_string("error_generic", lang))
-        await show_mode_menu(context, update.effective_chat.id)
-
-async def deepseek_r1_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    query: str,
-    *,
-    language: str | None = None,
-):
-    lang = language or context.chat_data.get('language', 'en')
-    translator = context.application.bot_data['translator']
-    llm_semaphore = context.application.bot_data["llm_semaphore"]
-
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    try:
-        async with llm_semaphore:
-            final_answer = await _require_legacy_llm_client().deepseek_r1_reply(query, lang)
-        
-        if not final_answer:
-            await update.message.reply_text(translator.get_string("error_generic", lang))
-            return
-
-        telegram_text = escape_markdown_v2(final_answer)
-        await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
-        await show_mode_menu(context, update.effective_chat.id)
-    except Exception as e:
-        logger.error("Error in DeepSeek R1 mode:", exc_info=True)
-        await update.message.reply_text(translator.get_string("error_generic", lang))
-        await show_mode_menu(context, update.effective_chat.id)
 
 # ---------------------------------------------------------------------------#
 #                         Core Logic (Worker)                                #
@@ -868,27 +407,20 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
             if llm_semaphore.locked():
                 await update.message.reply_text(translator.get_string("waiting_in_queue", lang))
 
-            mode = request.mode
-            logger.info(f"Worker {name} processing query for chat {chat_id} in mode {mode} with priority {priority}.")
+            logger.info(
+                "Worker %s processing chat=%s priority=%s",
+                name,
+                chat_id,
+                priority,
+            )
 
             # Start typing indicator
             typing_task = asyncio.create_task(send_typing_periodically(context.bot, chat_id))
 
-            handler_map = {
-                "web": fast_web_handler,
-                "deep_research": deep_research_handler,
-                "deep_search": deep_search_handler,
-                "fast_reply": fast_reply_handler, # New handler for Fast Answer
-                "deepseek_r1": deepseek_r1_handler,
-            }
-            handler = handler_map.get(mode)
-            if handler:
-                chat_locks = app_data["chat_locks"]
-                chat_lock = chat_locks.setdefault(chat_id, asyncio.Lock())
-                async with chat_lock:
-                    await handler(update, context, query, language=lang)
-            else:
-                await update.message.reply_text("Mode not implemented yet.")
+            chat_locks = app_data["chat_locks"]
+            chat_lock = chat_locks.setdefault(chat_id, asyncio.Lock())
+            async with chat_lock:
+                await fast_reply_handler(update, context, query, language=lang)
 
         except asyncio.CancelledError:
             raise
@@ -1230,16 +762,7 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.warning(f"Buffered query for chat {chat_id} exceeded max length ({len(full_query_text)} > {MAX_MESSAGE_LENGTH}).")
         return
 
-    # Determine priority based on the mode
-    mode = context.chat_data.get('mode', 'fast_reply')
-    priorities = {
-        "fast_reply": 1,  # Highest priority for fast answers
-        "web": 2,
-        "deepseek_r1": 3,
-        "deep_search": 4,
-        "deep_research": 5,  # Lowest priority for the most intensive task
-    }
-    priority = priorities.get(mode, 3)  # Default to 3
+    priority = 1
 
     # Get the request queue from bot_data
     request_queue = context.application.bot_data["request_queue"]
@@ -1248,12 +771,11 @@ async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
         context=context,
         chat_id=chat_id,
         query=full_query_text,
-        mode=mode,
         language=language,
     )
     await request_queue.put(priority, request)
 
-    logger.info(f"Buffered query for chat {chat_id} (mode: {mode}, priority: {priority}) submitted to main queue.")
+    logger.info("Buffered query submitted chat=%s priority=%s", chat_id, priority)
 
 # ---------------------------------------------------------------------------#
 #                                   Main                                     #
@@ -1272,23 +794,15 @@ async def main_async() -> None:
     translator = Translator('translations.json')
     request_queue = StablePriorityQueue(maxsize=100)
     llm_semaphore = asyncio.Semaphore(1)
-    reranker_instance = None
-    if config.WEB_ENABLED_DEFAULT:
-        _load_legacy_web_modules()
-        logger.info("Loading reranker model for enabled web path...")
-        reranker_instance = reranker.Reranker(config.RERANK_MODEL)
-        logger.info("Reranker model loaded.")
     whisper_transcriber = WhisperTranscriber(config.WHISPER_MODEL)
     worker_count = 3
 
-    inference_provider = None
-    if config.LLM_CLIENT == "ollama":
-        inference_provider = OllamaProvider(
-            base_url=config.OLLAMA_BASE_URL,
-            model=config.OLLAMA_MODEL,
-            timeout_seconds=config.OLLAMA_TIMEOUT,
-            context_window=config.OLLAMA_CONTEXT_TOKENS,
-        )
+    inference_provider = OllamaProvider(
+        base_url=config.OLLAMA_BASE_URL,
+        model=config.OLLAMA_MODEL,
+        timeout_seconds=config.OLLAMA_TIMEOUT,
+        context_window=config.OLLAMA_CONTEXT_TOKENS,
+    )
 
     application = (
         Application.builder()
@@ -1304,7 +818,6 @@ async def main_async() -> None:
     application.bot_data["request_queue"] = request_queue
     application.bot_data["chat_locks"] = {}
     application.bot_data["llm_semaphore"] = llm_semaphore
-    application.bot_data["reranker"] = reranker_instance # Add reranker to bot_data
     application.bot_data["whisper_transcriber"] = whisper_transcriber
     application.bot_data["inference_provider"] = inference_provider
 
@@ -1332,13 +845,16 @@ async def main_async() -> None:
                 logger.warning("Workers have finished, which is unexpected. Stopping.")
                 break
 
-            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
-                logger.error(f"Bot polling failed due to network/timeout error: {e}. Retrying in 15 seconds...")
+            except (telegram.error.NetworkError, telegram.error.TimedOut) as exc:
+                logger.error(
+                    "Bot polling failed type=%s; retrying in 15 seconds",
+                    type(exc).__name__,
+                )
                 if application.updater.running:
                     await application.updater.stop()
                 await asyncio.sleep(15)
-            except Exception as e:
-                logger.error(f"An unexpected error occurred in the main loop: {e}", exc_info=True)
+            except Exception as exc:
+                logger.error("Main loop failed type=%s", type(exc).__name__)
                 break
 
     except (KeyboardInterrupt, SystemExit):

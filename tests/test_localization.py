@@ -5,6 +5,8 @@ import string
 import unittest
 from pathlib import Path
 
+from utils import TRANSLATIONS as CONTENT_TRANSLATIONS
+
 
 TRANSLATIONS_PATH = Path(__file__).resolve().parents[1] / "translations.json"
 EXPECTED_LANGUAGES = {"de", "en", "es", "fr", "id", "pt", "ru", "tr"}
@@ -36,6 +38,14 @@ EXPECTED_KEYS = {
     "waiting_in_queue",
     "welcome_new_user",
 }
+EXPECTED_CONTENT_LANGUAGES = {"de", "en", "es", "id", "pt", "ru", "tr"}
+EXPECTED_CONTENT_KEYS = {
+    "Author_Title",
+    "Chunks Analyzed:",
+    "Research Statistics:",
+    "Total Characters Read:",
+    "Websites Visited:",
+}
 
 
 class TranslationContractTests(unittest.TestCase):
@@ -56,6 +66,13 @@ class TranslationContractTests(unittest.TestCase):
             if set(messages) != EXPECTED_KEYS
         }
         self.assertFalse(mismatches, mismatches)
+
+    def test_existing_content_strategy_translations_are_preserved(self) -> None:
+        self.assertEqual(set(CONTENT_TRANSLATIONS), EXPECTED_CONTENT_LANGUAGES)
+        for language, messages in CONTENT_TRANSLATIONS.items():
+            with self.subTest(language=language):
+                self.assertEqual(set(messages), EXPECTED_CONTENT_KEYS)
+                self.assertTrue(all(value.strip() for value in messages.values()))
 
     def test_translations_are_non_empty_and_keep_format_placeholders(self) -> None:
         formatter = string.Formatter()

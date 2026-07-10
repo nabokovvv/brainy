@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import logging
 import asyncio
 import httpx
 from typing import List, Dict, Any
 
-from entity_detector import detect_entities, load_nlp_model
-from wikidata_mapper import get_qid_from_entity, _get_p31_for_qid
+from entity_detector import detect_entities
+from wikidata_mapper import get_qid_from_entity
 from wikidata_fetcher import get_wikidata_description, get_wikipedia_lead_paragraph
 
 logger = logging.getLogger(__name__)
@@ -44,12 +46,17 @@ async def get_entity_info(query: str, lang: str) -> List[Dict]:
     detected_entities = detect_entities(query, lang)
 
     if not detected_entities:
-        logger.info(f"No entities found by spaCy NER in query: '{query}'")
+        logger.info("spaCy entity detection completed count=0 language=%s", lang)
         return []
 
-    logger.info(f"Successfully detected entities via spaCy NER: {[ent['text'] for ent in detected_entities]}")
+    logger.info(
+        "spaCy entity detection completed count=%s language=%s",
+        len(detected_entities),
+        lang,
+    )
 
-    async with httpx.AsyncClient() as client:
+    timeout = httpx.Timeout(10.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         # Create a list of unique entity texts to avoid duplicate lookups
         # Each entity is now a dict with 'text', 'label', and 'lemma' keys
         unique_entities = {}

@@ -134,6 +134,16 @@ class _JobQueue:
 
 
 class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    def test_legacy_modes_are_not_runtime_handlers(self) -> None:
+        removed_handlers = {
+            "deep_research_handler",
+            "deep_search_handler",
+            "deepseek_r1_handler",
+            "fast_web_handler",
+        }
+
+        self.assertFalse([name for name in removed_handlers if hasattr(bot, name)])
+
     async def test_cancelling_idle_worker_does_not_over_acknowledge_queue(self) -> None:
         queue: StablePriorityQueue[object] = StablePriorityQueue(maxsize=1)
         task = asyncio.create_task(
@@ -166,7 +176,7 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
             chat_data={"language": "en"},
         )
         update = SimpleNamespace(message=message)
-        request = bot.Request(update, context, 7, "question", "fast_reply", "ru")
+        request = bot.Request(update, context, 7, "question", "ru")
         await queue.put(1, request)
 
         async def fake_handler(update, context, query, *, language=None) -> None:
