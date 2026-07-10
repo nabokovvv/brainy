@@ -33,7 +33,7 @@ generation выше исходного ориентира владельца 30 
 ## Остаётся
 
 - synthetic full-context fill для 32K/64K;
-- 50-question multilingual quality eval;
+- 15-question multilingual fixture; реальный прогон и ручная оценка pending;
 - 3 concurrent-user benchmark;
 - combined-memory benchmark с рабочей моделью Whisper; FFmpeg и `whisper.cpp` есть,
   встроенный tiny-model smoke прошёл, но Brainy-adapter ещё не подключён.

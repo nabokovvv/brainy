@@ -1,0 +1,17 @@
+[
+  {"id":"en-01","language":"en","prompt":"Explain why a metal spoon feels colder than wood.","rubric":"Mentions thermal conductivity."},
+  {"id":"en-02","language":"en","prompt":"Give three practical steps for a weekly plan.","rubric":"Exactly three useful steps."},
+  {"id":"en-03","language":"en","prompt":"What is the difference between a hypothesis and a theory?","rubric":"Scientifically accurate distinction."},
+  {"id":"en-04","language":"en","prompt":"Explain recursion using a tiny analogy.","rubric":"Simple and correct."},
+  {"id":"es-01","language":"es","prompt":"Explica por qué el cielo se ve azul.","rubric":"Dispersión de la luz; español."},
+  {"id":"es-02","language":"es","prompt":"¿Cuál es la diferencia entre RAM y almacenamiento?","rubric":"Temporal frente a persistente."},
+  {"id":"ru-01","language":"ru","prompt":"Коротко объясни, почему металл кажется холоднее дерева.","rubric":"Упоминает теплопроводность."},
+  {"id":"ru-02","language":"ru","prompt":"Дай три шага для понятного недельного плана.","rubric":"Ровно три практичных шага."},
+  {"id":"ru-03","language":"ru","prompt":"Чем гипотеза отличается от теории?","rubric":"Корректное научное различие."},
+  {"id":"ru-04","language":"ru","prompt":"Объясни рекурсию через короткую аналогию.","rubric":"Просто и верно."},
+  {"id":"pt-01","language":"pt","prompt":"Explique por que uma colher de metal parece mais fria que uma de madeira.","rubric":"Condutividade térmica em português."},
+  {"id":"fr-01","language":"fr","prompt":"Explique pourquoi une cuillère en métal paraît plus froide qu'une en bois.","rubric":"Conductivité thermique en français."},
+  {"id":"de-01","language":"de","prompt":"Erkläre, warum sich ein Metalllöffel kälter anfühlt als Holz.","rubric":"Wärmeleitfähigkeit auf Deutsch."},
+  {"id":"tr-01","language":"tr","prompt":"Metal kaşığın neden tahtadan daha soğuk hissettirdiğini açıkla.","rubric":"Isı iletkenliği; Türkçe."},
+  {"id":"id-01","language":"id","prompt":"Jelaskan mengapa sendok logam terasa lebih dingin daripada kayu.","rubric":"Konduktivitas panas; bahasa Indonesia."}
+]
