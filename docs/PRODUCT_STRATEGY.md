@@ -47,7 +47,7 @@ Telegram message
   -> request snapshot + fair queue
   -> explicit Web OFF/ON state
      -> OFF: local Ollama model
-     -> ON: SearchGateway -> cited synthesis
+     -> ON: SearchGateway -> EvidenceBundle -> grounded cited synthesis
   -> optional bounded "Подробнее"
   -> short Telegram response + latency/source badge
 ```
@@ -85,6 +85,14 @@ Production runtime не должен зависеть от MCP-процесса.
 
 Все backends возвращают общий `SearchResult(title, url, snippet, rank, provider, published_at)`.
 
+Web ON не передаёт модели сырую выдачу бесконтрольно. SERP snippets, безопасно
+полученные фрагменты страниц и optional spaCy/Wikidata facts проходят multilingual
+chunking, deduplication, semantic rerank и source-diversity selection. Затем они
+укладываются в token-budgeted `EvidenceBundle` со стабильными evidence IDs и
+provenance. Модель отвечает только по этому контексту и возвращает citation IDs;
+реальные canonical URLs подставляет и проверяет код. Детальная recovery-карта старых
+авторских prompts и workflow хранится в `LEGACY_QUALITY_AUDIT.md`.
+
 ## OpenRouter scanner
 
 Scanner обновляет каталог, но не принимает продуктовые решения сам:
@@ -95,6 +103,10 @@ discovered -> eligible -> canary -> active
 ```
 
 Eligibility требует `:free`, нулевые используемые price dimensions, text capability, достаточные context/output limits, отсутствие истечения и нужные параметры. Каталог кэшируется; при ошибке используется last-known-good snapshot. Active route фиксируется на весь запрос, чтобы модель не менялась посреди многошаговой операции.
+
+**Apriel Thinker 15B** остаётся `discovered` candidate: по наблюдению владельца она
+красиво пишет по-английски. Мультиязычность, latency и фактическая нулевая цена
+конкретного endpoint должны быть подтверждены canary до production routing.
 
 ## Мягкие метрики MVP
 

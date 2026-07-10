@@ -4,8 +4,7 @@
 
 ## Текущий checkpoint Stage 0
 
-Локально завершены slices 0.1 и 0.2 в части, не требующей скачивания пакетов или
-реальных credentials:
+Локально завершены slices 0.1 и 0.2 в части, не требующей реальных credentials:
 
 - добавлены `pyproject.toml`, безопасный `.env.example` и local-first README;
 - конфигурация импортируется без Telegram/Together/Yandex/Wikidata keys и fail-closed
@@ -18,19 +17,24 @@
   request snapshot;
 - charts и автоматический Markdown-экспорт приватных разговоров удалены;
 - все 8 локалей и фиксированный baseline из 26 ключей защищены тестом;
-- 55 offline regression/contract tests проходят, Python 3.12 `compileall` green.
+- `uv.lock` зафиксирован; frozen sync с default и `research` extra воспроизводится;
+- 57 offline regression/contract tests проходят, Python 3.12 `compileall`, Ruff
+  check и format check green;
+- optional spaCy/Wikidata/reranker/page utilities устанавливаются и проходят import
+  smoke без загрузки языковых моделей при import.
 
 Локальные коммиты checkpoint: `a842d48`, `4fff399`, `2911107`, `57d1083`.
 
 Stage 0 ещё не закрыт. До exit gate остаются:
 
-- сгенерировать `uv.lock`, выполнить clean `uv sync`, Ruff и полный pytest после
-  восстановления доступа к package registry;
 - real smoke Ollama/Whisper/Telegram: на текущем MacBook не установлены Ollama и
   FFmpeg, а target model tag должен быть подтверждён на Mac mini;
-- проверить и укрепить сохранённые optional research utilities до подключения к
-  будущему Web ON path;
-- добавить CI после появления lockfile.
+- завершить characterization и доработку optional research utilities перед их
+  подключением к Web ON path;
+- выбрать доказанно бесплатный CI: self-hosted runner на Mac mini либо hosted Actions
+  только после подтверждения public/free minutes и spending limit `0`;
+- добавить бесплатный dependency audit: GitHub Dependency Review нельзя считать
+  доступным для private repo без подтверждённого GitHub Advanced Security.
 
 ## Исходное состояние
 
@@ -149,9 +153,13 @@ Gate:
 
 ### Slice 0.4 — CI
 
-- Добавить CI для Python syntax, Ruff и pytest.
-- В CI нет real provider keys и quota-consuming smoke tests.
-- Добавить dependency/security audit без автоматического destructive upgrade.
+- [ ] Добавить zero-cost CI для Python syntax, Ruff и pytest после выбора бесплатного
+  runner; workflow не должен автоматически расходовать hosted minutes.
+- [ ] В CI не передавать real provider keys и не запускать quota-consuming smoke tests.
+- [ ] Добавить доступный для private repo dependency/security audit без destructive
+  upgrades и платного GitHub Advanced Security.
+- [ ] Подтвердить green run после явного разрешения на push и настройки spending
+  limit `0` либо self-hosted runner.
 
 Exit Stage 0:
 
@@ -167,8 +175,10 @@ Exit Stage 0:
 Checkpoint: старые mode handlers и Together/Yandex provider adapters удалены.
 spaCy/Wikidata/reranker/page utilities сохранены отдельным optional research extra и
 не импортируются fast path. Runtime оставляет один local chat path и Whisper.
-Следующий slice — аудит этих utilities, затем явный `Web OFF/ON` intent без включения
-поиска до готовности Stage 2 adapter.
+Forensic-аудит старых prompts/workflows закреплён в `LEGACY_QUALITY_AUDIT.md`:
+ценные механики доступны в Git и перенесены в Stage 2 как provider-neutral contracts.
+Следующий slice — явный `Web OFF/ON` intent без включения поиска до готовности Stage 2
+adapter.
 
 - Заменить четыре режима одним чатом и явным persistent-переключателем `Web OFF/ON`; никакого LLM/freshness preflight.
 - Подключить установленную Gemma 4 E2B как benchmark baseline и зафиксировать точный Ollama tag на Mac.
@@ -213,11 +223,40 @@ Recommended commits:
 ### Answer path
 
 - Web path запускается только при явном `Web ON`; состояние фиксируется в request snapshot.
-- Web synthesis использует 2–3 источника и привязывает ссылки к утверждениям.
-- Источники назначаются кодом только из реально использованных result/chunk IDs; URL, придуманный моделью, отбрасывается.
-- Web content явно помечается как недоверенные данные, команды внутри страниц не исполняются как prompt instructions.
+- Base Web ON начинает с исходного запроса и не тратит отдельный LLM-вызов на
+  freshness classifier или query expansion.
+- SERP snippets и безопасно извлечённые page chunks проходят multilingual chunking,
+  canonical/near dedupe, semantic rerank per query и source-diversity selection.
+- spaCy -> Wikidata/Wikipedia enrichment остаётся optional evidence с коротким
+  timeout и fail-soft поведением; оно не является финальным источником истины.
+- Выбранный контекст упаковывается в детерминированный token-budgeted
+  `EvidenceBundle`: stable evidence ID, text, canonical URL, provenance, rank и trust
+  type. Shared clients создаются на lifespan, а sync spaCy/reranker work не блокирует
+  event loop.
+- Web synthesis получает только исходный вопрос и `EvidenceBundle`, отвечает на
+  выбранном языке, не добавляет фактов вне evidence, отмечает конфликты/неуверенность
+  и возвращает structured `{answer, citation_ids}` без chain-of-thought.
+- Источники назначаются кодом только из реально использованных evidence IDs; URL,
+  придуманный моделью, и неизвестный citation ID отбрасываются.
+- Web content явно отделяется как недоверенные данные; команды внутри страниц не
+  исполняются как prompt instructions.
 - «Подробнее»: до 2 параллельных подзапросов, 4 страниц, общий deadline 30 секунд.
 - При падении поиска bot явно сообщает, что свежесть не проверена; не выдаёт local answer как актуальный.
+
+### Preserved quality library
+
+- Characterization fixtures сохраняют смыслы legacy `get_sub_queries`,
+  `get_research_steps`, `generate_summary_from_chunks`, grouped synthesis и
+  `polish_research_answer`, но prompts отделены от transport/provider code.
+- Query expansion для «Подробнее» сохраняет короткие/длинные формулировки на языке
+  пользователя и один English-вариант, но ограничивается двумя подзапросами в MVP.
+- Multilingual sentence chunking проверяется на всех 8 локалях; safe redirects
+  следуются вручную не более 2–3 hops с повторной DNS/IP validation каждого target.
+- Rerank policy получает инъецируемые `top_n`/threshold; exact и near duplicates
+  схлопываются без потери provenance.
+- Legacy deep workflow (entity-aware plan до 6 шагов -> retrieval/rerank -> grounded
+  section summaries -> bounded map/reduce -> editorial pass) архивируется как будущая
+  beta, а не возвращается отдельным публичным режимом MVP.
 
 Gate:
 
@@ -225,6 +264,10 @@ Gate:
 - основной free search failure -> разрешённый zero-cost fallback;
 - все providers fail -> bounded transparent response;
 - citation support >= 90%, stale-answer rate < 2%;
+- context pack детерминированно соблюдает token budget и не режет evidence посередине;
+- multilingual chunking/dedupe/rerank fixtures сохраняют релевантный контекст и
+  diversity источников;
+- entity enrichment fail-soft при отсутствии spaCy model или Wikidata;
 - prompt-injection fixture не меняет system rules и не добавляет неподтверждённые ссылки;
 - latency записывается и сравнивается с мягкими ориентирами, не блокируя раннюю закрытую beta без явной регрессии.
 
@@ -249,6 +292,9 @@ Gate:
 - Canary проверяет короткую мультиязычную выборку, latency и заявленные JSON/tools capabilities.
 - Active set — 2–3 curated models; `openrouter/free` — последний fallback.
 - Учитывать free limits и вести собственный UTC daily counter.
+- Apriel Thinker 15B сохраняется в статусе `discovered`: владелец отметил качество
+  английского текста; multilingual eval и доказанная цена endpoint `0` обязательны
+  до `eligible/canary/active`.
 
 Gate:
 
