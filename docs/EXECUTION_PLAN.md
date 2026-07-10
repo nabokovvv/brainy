@@ -185,7 +185,10 @@ Stage 2 adapter отсутствует, Web snapshot отвечает локал
 
 На target Mac mini подтверждены exact `gemma4:e2b`, key-based SSH и initial
 single-user 8K/32K/64K baseline без нового swap; результаты в
-`MAC_MINI_BENCHMARK_BASELINE.md`. Stage 1 ещё требует Whisper combined-memory прогона.
+`MAC_MINI_BENCHMARK_BASELINE.md`. Persistent Whisper large-v3 combined-memory прогон
+выполнен: Gemma осталась быстрой, но загрузка Whisper добавила около 746 MB swap,
+что владелец считает допустимой ценой качества для MVP. Large-v3 перенесена из
+volatile `/tmp` в постоянный каталог Brainy; дальше нужен runtime adapter.
 Full-context retention smoke прошёл на фактических
 32K/64K input tokens без нового swap, но с TTFT 70/192 s, поэтому это capability,
 а не fast default. Multilingual baseline дал 14/15 по ручной оценке;

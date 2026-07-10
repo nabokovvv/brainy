@@ -56,7 +56,23 @@ context. Фактические `prompt_eval_count` — 32,000 и 64,000; оба
 ошибка — некорректная формулировка об изоляции дерева в индонезийском ответе.
 Response и review fixtures сохранены в `tests/results/`.
 
+## Whisper large-v3 combined memory
+
+На target найдена существующая `whisper.cpp` large-v3 модель размером 2.9 GB. При
+persistent `whisper-server` её RSS составил 3.36 GB; вместе с warm Gemma — 9.17 GB.
+Gemma сохранила TTFT 358 ms и total 386 ms, а тестовая транскрипция была непустой.
+Однако загрузка Whisper увеличила использованный swap примерно с 1055 MB до 1801 MB.
+Сам Gemma-запрос нового swap не добавил.
+
+Итог владельца: рост swap примерно на 746 MB допустим ради качества large-v3 и не
+блокирует MVP; наблюдаем длительный memory pressure, но не заменяем модель только
+ради нулевого swap. Метрики сохранены в
+`tests/results/gemma4-e2b-whisper-large-v3-combined-2026-07-11*.json`.
+Model file перенесён в постоянный
+`~/Library/Application Support/Brainy/models/whisper/ggml-large-v3.bin`; сама модель
+не хранится в Git.
+
 ## Остаётся
 
-- combined-memory benchmark с рабочей моделью Whisper; FFmpeg и `whisper.cpp` есть,
-  встроенный tiny-model smoke прошёл, но Brainy-adapter ещё не подключён.
+- подключить whisper.cpp large-v3 к Brainy;
+- UI tests для progressive Telegram delivery и message limits.

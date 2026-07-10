@@ -1,0 +1,17 @@
+{
+  "case_id": "whisper-loaded-8k",
+  "completion_tokens": 2,
+  "context_tokens": 8192,
+  "expected_markers_seen": null,
+  "generation_tokens_per_second": 71.58,
+  "max_output_tokens": 32,
+  "model": "gemma4:e2b",
+  "ollama_rss_kib_after": 5811088,
+  "ollama_rss_kib_before": 5799392,
+  "prompt_tokens": 18,
+  "prompt_tokens_per_second": 148.43,
+  "swap_after": "total = 3072.00M  used = 1793.44M  free = 1278.56M  (encrypted)",
+  "swap_before": "total = 3072.00M  used = 1793.44M  free = 1278.56M  (encrypted)",
+  "total_ms": 386.0,
+  "ttft_ms": 358.1
+}

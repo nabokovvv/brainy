@@ -1,0 +1,22 @@
+{
+  "date": "2026-07-11",
+  "ollama_model": "gemma4:e2b",
+  "ollama_context_tokens": 8192,
+  "whisper_runtime": "whisper.cpp 1.9.1 loopback server",
+  "whisper_model": "large-v3",
+  "whisper_model_size_gb": 2.9,
+  "whisper_model_sha256_prefix": "64d182b440b98d52",
+  "audio_case_id": "whisper.cpp-1.9.1-bundled-jfk.wav",
+  "audio_sha256": "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e",
+  "public_audio_transcription_nonempty": true,
+  "whisper_rss_kib": 3363568,
+  "ollama_rss_kib": 5809264,
+  "combined_rss_kib": 9172832,
+  "swap_used_before_whisper_mb": 1055.38,
+  "swap_used_after_whisper_mb": 1801.44,
+  "swap_used_before_gemma_mb": 1793.44,
+  "swap_used_after_gemma_mb": 1793.44,
+  "gemma_ttft_ms": 358.1,
+  "gemma_total_ms": 386.0,
+  "verdict": "owner accepts roughly 746 MB additional swap for large-v3 quality; monitor sustained memory pressure but do not downgrade solely to reach zero swap"
+}

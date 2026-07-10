@@ -49,3 +49,8 @@ Key-based SSH через `lobster@Mac.local` подтверждён; для бу
 установлены. Встроенный публичный tiny-model smoke прошёл 2026-07-10. Brainy пока
 использует lazy Python `openai-whisper`, поэтому это не означает готовой интеграции:
 не скачивать модели и не ставить зависимости без отдельного разрешения владельца.
+
+Проверенная large-v3 модель находится в
+`~/Library/Application Support/Brainy/models/whisper/ggml-large-v3.bin`; executable —
+`/opt/homebrew/bin/whisper-cli`. Fingerprint модели сохранён в combined benchmark
+review, сама модель не копируется в репозиторий.
