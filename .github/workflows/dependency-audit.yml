@@ -1,0 +1,55 @@
+name: Dependency Audit
+
+on:
+  workflow_dispatch:  # manual trigger only - zero auto spend
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC (optional, disable if no free minutes)
+
+permissions:
+  contents: read
+  security-events: write  # for SARIF upload (free on public, requires GHAS on private)
+
+jobs:
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "uv.lock"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen --group audit
+
+      - name: Run dependency audit
+        id: audit
+        run: |
+          python scripts/audit_deps.py --fail-on high
+        env:
+          PIP_AUDIT_CACHE_DIR: ${{ runner.temp }}/pip-audit-cache
+          SAFETY_CACHE_DIR: ${{ runner.temp }}/safety-cache
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-report
+          path: dependency-audit-report.json
+          retention-days: 30
+
+      - name: Upload SARIF (requires GitHub Advanced Security on private repos)
+        if: always() && github.repository_visibility == 'public'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dependency-audit-report.json
+          category: dependency-audit

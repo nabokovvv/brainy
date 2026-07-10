@@ -2,6 +2,24 @@
 
 Статус аудита: 2026-07-10. Рабочее дерево на момент первичного аудита было чистым; тестов, CI и `AGENTS.md` не было.
 
+> Заметка для следующего агента (Claude, 2026-07-11): пока codex работал над
+> whisper.cpp backend (`brainy_core/voice.py`, `bot.py`, `config.py`, зафиксировано
+> в commit `539f04a`), я параллельно закрыл Slice 0.4 CI: добавлен
+> `.github/workflows/ci.yml` на self-hosted Mac mini runner, см. чеклист ниже.
+> Файлы codex не трогал.
+>
+> Обновление (Claude, 2026-07-11, второй проход): пока я работал, codex
+> параллельно (без отдельного worktree, тот же working tree) сделал lazy-import
+> для spaCy/aiohttp+BeautifulSoup/torch+sentence-transformers+scikit-learn в
+> `entity_detector.py`, `page_processor.py`, `reranker.py` (понятная
+> `RuntimeError` вместо `ImportError` при отсутствии `research` extra) и добавил
+> dependency/security audit tooling: `pyproject.toml` extra `audit`
+> (`pip-audit`, `safety`), `scripts/audit_deps.py`,
+> `dependency-audit-report.json`. Всё это ещё не закоммичено ни codex, ни мной;
+> 76 тестов и ruff остаются green после обоих наборов изменений. Осталось
+> руками зарегистрировать self-hosted runner на самом Mac mini и решить,
+> нужно ли добавить шаг `audit_deps.py` в `.github/workflows/ci.yml`.
+
 ## Текущий checkpoint Stage 0
 
 Локально завершены slices 0.1 и 0.2 в части, не требующей реальных credentials:
@@ -21,7 +39,10 @@
 - 57 offline regression/contract tests проходят, Python 3.12 `compileall`, Ruff
   check и format check green;
 - optional spaCy/Wikidata/reranker/page utilities устанавливаются и проходят import
-  smoke без загрузки языковых моделей при import.
+  smoke без загрузки языковых моделей при import; тяжёлые зависимости
+  (`spacy`, `aiohttp`, `bs4`, `torch`, `sentence-transformers`, `scikit-learn`)
+  теперь импортируются лениво внутри функций с понятной `RuntimeError`, а не на
+  верхнем уровне модуля (не закоммичено).
 
 Локальные коммиты checkpoint: `a842d48`, `4fff399`, `2911107`, `57d1083`.
 
@@ -60,6 +81,7 @@ Stage 0 ещё не закрыт. До exit gate остаются:
 - `.env` не игнорируется, хотя README предлагает его использовать; tracked `config.py` одновременно указан в ignore.
 - Нет streaming: «Fast» показывает typing до полного ответа.
 - Состояние, очередь и настройки пользователей теряются при рестарте.
+- Бот не хранит историю сообщений: каждый запрос обрабатывается изолированно, без multi-turn контекста (см. `docs/BACKLOG_IDEAS.md`).
 
 На момент первичного аудита baseline-команда падала на syntax error:
 
@@ -153,13 +175,20 @@ Gate:
 
 ### Slice 0.4 — CI
 
-- [ ] Добавить zero-cost CI для Python syntax, Ruff и pytest после выбора бесплатного
-  runner; workflow не должен автоматически расходовать hosted minutes.
+- [x] Выбран self-hosted runner на Mac mini (машина всегда online) — zero cost,
+  без hosted Actions minutes/billing. Workflow: `.github/workflows/ci.yml`
+  (compile check, `ruff check`, `ruff format --check`, `pytest -q`).
+- [ ] Зарегистрировать GitHub Actions self-hosted runner на самом Mac mini
+  (labels `self-hosted, macos, mac-mini`) — это ручной шаг с токеном из GitHub
+  Settings → Actions → Runners, выполняется на самой машине, не удалённо.
 - [ ] В CI не передавать real provider keys и не запускать quota-consuming smoke tests.
-- [ ] Добавить доступный для private repo dependency/security audit без destructive
-  upgrades и платного GitHub Advanced Security.
-- [ ] Подтвердить green run после явного разрешения на push и настройки spending
-  limit `0` либо self-hosted runner.
+- [~] Dependency/security audit: codex добавил `scripts/audit_deps.py`
+  (запускает `pip-audit`/`safety`, fail-closed на high/critical, без платных
+  фич) и `audit` extra в `pyproject.toml`; текущий `dependency-audit-report.json`
+  пуст (`vulnerabilities: []`). Не закоммичено. Осталось: подключить как шаг в
+  `.github/workflows/ci.yml` и решить, коммитить ли report в репозиторий или
+  генерировать его только в CI как artifact.
+- [ ] Подтвердить green run после явного разрешения на push.
 
 Exit Stage 0:
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import aiohttp
-from bs4 import BeautifulSoup
 import logging
 import re
 import socket
@@ -23,6 +21,26 @@ class TextChunk:
         self.text = text
         self.source_url = source_url
         self.index = index
+
+
+def _get_aiohttp():
+    try:
+        import aiohttp
+    except ImportError as exc:
+        raise RuntimeError(
+            "aiohttp is not installed. Install the 'research' extra: pip install -e '.[research]'"
+        ) from exc
+    return aiohttp
+
+
+def _get_beautifulsoup():
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError as exc:
+        raise RuntimeError(
+            "beautifulsoup4 is not installed. Install the 'research' extra: pip install -e '.[research]'"
+        ) from exc
+    return BeautifulSoup
 
 
 async def _read_bounded_body(response, limit: int = MAX_RESPONSE_BYTES) -> bytes:
@@ -69,6 +87,7 @@ async def fetch_page(session, url: str, retries: int = 2):
 
     host = urlparse(url).hostname or "unknown"
     headers = {"User-Agent": config.CUSTOM_USER_AGENT}
+    aiohttp = _get_aiohttp()
     timeout = aiohttp.ClientTimeout(total=10, connect=5)
     for attempt in range(retries):
         try:
@@ -103,6 +122,7 @@ async def fetch_page(session, url: str, retries: int = 2):
 def clean_html(html_content, url):
     host = urlparse(url).hostname or "unknown"
     try:
+        BeautifulSoup = _get_beautifulsoup()
         soup = BeautifulSoup(html_content, "html.parser")
         for script_or_style in soup(["script", "style"]):
             script_or_style.decompose()
@@ -178,6 +198,7 @@ def chunk_text(text, source_url, max_chunk_words=150):
 
 
 async def fetch_and_process_pages(urls):
+    aiohttp = _get_aiohttp()
     async with aiohttp.ClientSession() as session:
         unique_urls = list(dict.fromkeys(urls))[:MAX_PAGES_PER_REQUEST]
         tasks = [fetch_page(session, url) for url in unique_urls]

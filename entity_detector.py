@@ -4,9 +4,6 @@ import logging
 import re
 import threading
 
-import spacy
-
-
 logger = logging.getLogger(__name__)
 
 # A regex to find leading conjunctions and similar words in different languages
@@ -30,8 +27,19 @@ _nlp_models = {}
 _model_load_lock = threading.Lock()
 
 
+def _get_spacy():
+    try:
+        import spacy
+    except ImportError as exc:
+        raise RuntimeError(
+            "spacy is not installed. Install the 'research' extra: pip install -e '.[research]'"
+        ) from exc
+    return spacy
+
+
 def load_nlp_model(lang: str):
     """Loads and caches the spaCy NLP model for the given language."""
+    spacy = _get_spacy()
     model_name = LANG_MODEL_MAP.get(lang, "xx_ent_wiki_sm")  # Fallback to multilingual
 
     if model_name not in _nlp_models:
