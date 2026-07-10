@@ -30,12 +30,21 @@ generation выше исходного ориентира владельца 30 
 Это не означает готовность к public beta: пробы использовали короткий input и одного
 пользователя.
 
+## Три одновременных пользователя
+
+2026-07-11 три synthetic-запроса одновременно поступили в один сериализованный
+generation slot с 8K context и output cap 64. Cold запрос завершился за 5.87 s,
+два warm — примерно за 1.93 s каждый; максимальная end-to-end задержка с очередью
+составила 9.95 s. Все три запроса завершились, generation держалась около 40 tok/s,
+RSS стабилизировался около 5.9 GB, использованный swap не изменился (1063.38 MB).
+Сырые метрики сохранены в `tests/results/gemma4-e2b-concurrency-2026-07-11.json`.
+Этот bounded batch не является длительным fairness/load-тестом.
+
 ## Остаётся
 
 - synthetic full-context fill для 32K/64K;
 - 15-question multilingual run: 15/15 non-empty; ручная оценка 14/15. Единственная
   ошибка — некорректная формулировка об изоляции дерева в индонезийском ответе;
   подробные synthetic-only response/review fixtures находятся в `tests/results/`.
-- 3 concurrent-user benchmark;
 - combined-memory benchmark с рабочей моделью Whisper; FFmpeg и `whisper.cpp` есть,
   встроенный tiny-model smoke прошёл, но Brainy-adapter ещё не подключён.

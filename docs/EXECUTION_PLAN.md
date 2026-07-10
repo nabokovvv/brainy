@@ -186,7 +186,10 @@ Stage 2 adapter отсутствует, Web snapshot отвечает локал
 На target Mac mini подтверждены exact `gemma4:e2b`, key-based SSH и initial
 single-user 8K/32K/64K baseline без нового swap; результаты в
 `MAC_MINI_BENCHMARK_BASELINE.md`. Это не закрывает Stage 1 gate: нужны full-context,
-multilingual, concurrency и Whisper combined-memory прогоны.
+и Whisper combined-memory прогоны. Multilingual baseline дал 14/15 по ручной оценке;
+три concurrent arrivals через один generation slot завершились без нового swap и
+максимум за 9.95 s end-to-end. Это закрывает bounded batch из трёх запросов, но не
+доказывает отсутствие starvation под длительным потоком.
 
 - [x] Заменить четыре режима одним чатом и явным session-persistent переключателем
   `Web OFF/ON`; никакого LLM/freshness preflight.
