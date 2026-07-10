@@ -82,6 +82,17 @@ SEARCH_BACKEND=disabled
 single-user baseline is recorded in [the Mac mini benchmark](docs/MAC_MINI_BENCHMARK_BASELINE.md).
 Do not enable web yet: a production-safe, zero-cost backend has not been integrated.
 
+The target Mac mini uses the owner's verified whisper.cpp large-v3 model:
+
+```dotenv
+WHISPER_BACKEND=cpp
+WHISPER_CPP_EXECUTABLE=/opt/homebrew/bin/whisper-cli
+WHISPER_CPP_FFMPEG=/opt/homebrew/bin/ffmpeg
+WHISPER_CPP_MODEL=~/Library/Application Support/Brainy/models/whisper/ggml-large-v3.bin
+```
+
+The default `WHISPER_BACKEND=python` remains available for development machines.
+
 Never commit `.env`, tokens, API keys, or real user data.
 
 ### 3. Run the bot
@@ -114,8 +125,7 @@ providers.
 - The route switch is session-persistent and captured with each buffered request;
   durable persistence across bot restarts is not implemented yet.
 - Web search is disabled until a safe zero-cost provider contract is implemented.
-- The exact Gemma Ollama tag and 8K/32K/64K performance still need verification on
-  the target Mac mini M4 with 16 GB unified memory.
+- Telegram progressive delivery and Web ON search are not implemented yet.
 - The repository is under active Stage 0 cleanup and is not production-ready.
 
 ## License

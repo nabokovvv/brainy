@@ -8,7 +8,7 @@ import textwrap
 import time
 import unittest
 
-from brainy_core.voice import WhisperTranscriber, WhisperTranscriptionError
+from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber, WhisperTranscriptionError
 
 
 class FakeWhisperModel:
@@ -208,6 +208,69 @@ class WhisperTranscriberTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(results[1])
         self.assertEqual(loader.calls, 1)
         self.assertTrue(transcriber.is_loaded)
+
+
+class FakeProcess:
+    def __init__(self, stdout: bytes = b"  voice text  ", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.returncode = returncode
+        self.terminated = False
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return self.stdout, b"ignored diagnostics"
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.terminated = True
+
+    async def wait(self) -> int:
+        return self.returncode
+
+
+class WhisperCppTranscriberTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runs_configured_model_and_returns_text(self) -> None:
+        calls: list[tuple[object, ...]] = []
+        processes = [FakeProcess(stdout=b""), FakeProcess()]
+
+        async def factory(*args: object, **kwargs: object) -> FakeProcess:
+            calls.append(args)
+            self.assertIn("stdout", kwargs)
+            return processes.pop(0)
+
+        transcriber = WhisperCppTranscriber(
+            executable="~/bin/whisper-cli",
+            model_path="~/models/large-v3.bin",
+            process_factory=factory,
+        )
+
+        text = await transcriber.transcribe("voice.oga", language="ru")
+
+        self.assertEqual(text, "voice text")
+        self.assertIn("voice.oga", calls[0])
+        self.assertIn("pcm_s16le", calls[0])
+        self.assertIn("ru", calls[1])
+        self.assertTrue(any(str(argument).endswith(".wav") for argument in calls[1]))
+
+    async def test_nonzero_exit_is_a_safe_error(self) -> None:
+        calls = 0
+
+        async def factory(*_: object, **__: object) -> FakeProcess:
+            nonlocal calls
+            calls += 1
+            return FakeProcess(
+                stdout=b"" if calls == 1 else b"failure", returncode=0 if calls == 1 else 1
+            )
+
+        transcriber = WhisperCppTranscriber(
+            executable="whisper-cli",
+            model_path="large-v3.bin",
+            process_factory=factory,
+        )
+
+        with self.assertRaisesRegex(WhisperTranscriptionError, "failed"):
+            await transcriber.transcribe("voice.oga", language="en")
 
 
 if __name__ == "__main__":

@@ -43,6 +43,19 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.whisper_model, "base")
 
+    def test_cpp_whisper_requires_explicit_paths(self) -> None:
+        settings = Settings.from_env(
+            {
+                "WHISPER_BACKEND": "cpp",
+                "WHISPER_CPP_EXECUTABLE": " ",
+                "WHISPER_CPP_MODEL": " ",
+                "WHISPER_CPP_FFMPEG": " ",
+            }
+        )
+
+        with self.assertRaisesRegex(ConfigurationError, "WHISPER_CPP"):
+            settings.validate()
+
     def test_remote_provider_is_fail_closed_until_free_only_routing_exists(self) -> None:
         settings = Settings.from_env(
             {"LLM_CLIENT": "together", "TOGETHER_AI_API_KEY": "not-a-real-key"}

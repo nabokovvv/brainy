@@ -28,7 +28,7 @@ import config
 from brainy_core import ProviderError, RouteIntent, build_fast_chat_request
 from brainy_core.providers import OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
-from brainy_core.voice import WhisperTranscriber
+from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
 from utils import strip_think
 
@@ -974,7 +974,14 @@ async def main_async() -> None:
     translator = Translator("translations.json")
     request_queue = StablePriorityQueue(maxsize=100)
     llm_semaphore = asyncio.Semaphore(1)
-    whisper_transcriber = WhisperTranscriber(config.WHISPER_MODEL)
+    if config.WHISPER_BACKEND == "cpp":
+        whisper_transcriber = WhisperCppTranscriber(
+            executable=config.WHISPER_CPP_EXECUTABLE,
+            model_path=config.WHISPER_CPP_MODEL,
+            ffmpeg_executable=config.WHISPER_CPP_FFMPEG,
+        )
+    else:
+        whisper_transcriber = WhisperTranscriber(config.WHISPER_MODEL)
     worker_count = 3
 
     inference_provider = OllamaProvider(

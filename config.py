@@ -56,6 +56,10 @@ class Settings:
     ollama_timeout_seconds: float
     ollama_context_tokens: int
     whisper_model: str
+    whisper_backend: str
+    whisper_cpp_executable: str
+    whisper_cpp_model: str
+    whisper_cpp_ffmpeg: str
     web_enabled_default: bool
     search_backend: str
 
@@ -81,6 +85,15 @@ class Settings:
                 name="OLLAMA_CONTEXT_TOKENS",
             ),
             whisper_model=source.get("WHISPER_MODEL", "base").strip(),
+            whisper_backend=source.get("WHISPER_BACKEND", "python").strip().lower(),
+            whisper_cpp_executable=source.get(
+                "WHISPER_CPP_EXECUTABLE", "/opt/homebrew/bin/whisper-cli"
+            ).strip(),
+            whisper_cpp_model=source.get(
+                "WHISPER_CPP_MODEL",
+                "~/Library/Application Support/Brainy/models/whisper/ggml-large-v3.bin",
+            ).strip(),
+            whisper_cpp_ffmpeg=source.get("WHISPER_CPP_FFMPEG", "/opt/homebrew/bin/ffmpeg").strip(),
             web_enabled_default=_env_bool(source.get("WEB_ENABLED_DEFAULT"), default=False),
             search_backend=source.get("SEARCH_BACKEND", "disabled").strip().lower(),
         )
@@ -108,6 +121,15 @@ class Settings:
             errors.append("OLLAMA_CONTEXT_TOKENS must be between 1 and 65536")
         if not self.whisper_model.strip():
             errors.append("WHISPER_MODEL must be non-empty")
+        if self.whisper_backend not in {"python", "cpp"}:
+            errors.append("WHISPER_BACKEND must be 'python' or 'cpp'")
+        if self.whisper_backend == "cpp":
+            if not self.whisper_cpp_executable:
+                errors.append("WHISPER_CPP_EXECUTABLE must be non-empty")
+            if not self.whisper_cpp_model:
+                errors.append("WHISPER_CPP_MODEL must be non-empty")
+            if not self.whisper_cpp_ffmpeg:
+                errors.append("WHISPER_CPP_FFMPEG must be non-empty")
 
         web_required = self.web_enabled_default if require_web is None else require_web
         if self.search_backend != "disabled":
@@ -128,6 +150,10 @@ OLLAMA_MODEL = SETTINGS.ollama_model
 OLLAMA_TIMEOUT = SETTINGS.ollama_timeout_seconds
 OLLAMA_CONTEXT_TOKENS = SETTINGS.ollama_context_tokens
 WHISPER_MODEL = SETTINGS.whisper_model
+WHISPER_BACKEND = SETTINGS.whisper_backend
+WHISPER_CPP_EXECUTABLE = SETTINGS.whisper_cpp_executable
+WHISPER_CPP_MODEL = SETTINGS.whisper_cpp_model
+WHISPER_CPP_FFMPEG = SETTINGS.whisper_cpp_ffmpeg
 
 # Dormant research defaults. These utilities are not imported by the fast runtime;
 # Stage 2 will replace module globals with injected adapter settings.
