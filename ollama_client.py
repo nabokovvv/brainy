@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlparse
 
 import config
-from config import OLLAMA_ENDPOINT, OLLAMA_MODEL, FACTUAL_PARAMS, DEEP_SEARCH_STEP_ONE_MODEL, CREATIVE_PARAMS, FACTUAL_PARAMS_2, DEEP_SEARCH_STEP_ONE_MODEL, DEEP_SEARCH_STEP_FINAL_MODEL, OLLAMA_TIMEOUT
+from config import OLLAMA_ENDPOINT, OLLAMA_MODEL, FACTUAL_PARAMS, DEEP_SEARCH_STEP_ONE_MODEL, CREATIVE_PARAMS, FACTUAL_PARAMS_2, DEEP_SEARCH_STEP_FINAL_MODEL, OLLAMA_TIMEOUT
 from utils import detect_language, _filter_duplicate_chunks
 
 from together import Together
@@ -124,7 +124,7 @@ Query from user: {query}
         logger.warning(f"Ollama (research-steps) - Could not decode JSON: {e}. Raw string was: {json_string}")
         # Fallback to original regex if JSON parsing fails
         steps = re.findall(r'\d+\.\s*"(.*?)"|\d+\.\s*(.*)', response_text)
-        steps = [item for sublist in sub_queries for item in sublist if item]
+        steps = [item for sublist in steps for item in sublist if item]
 
     logger.info(f"Ollama (research-steps) - Parsed Steps: {steps}")
     return steps
@@ -403,7 +403,7 @@ async def generate_answer_from_serp(query: str, snippets: list, lang: str, trans
     final_answer = response_text
 
     if top_sources:
-        final_answer += f"\n\n{translator.get_string("sources_label", lang)}:\n"
+        final_answer += f"\n\n{translator.get_string('sources_label', lang)}:\n"
         for i, url in enumerate(top_sources):
             final_answer += f"{i+1}. {url}\n"
 

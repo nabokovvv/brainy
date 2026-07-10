@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import json
+import string
+import unittest
+from pathlib import Path
+
+
+TRANSLATIONS_PATH = Path(__file__).resolve().parents[1] / "translations.json"
+EXPECTED_LANGUAGES = {"de", "en", "es", "fr", "id", "pt", "ru", "tr"}
+EXPECTED_KEYS = {
+    "change_language_button",
+    "change_mode_button_text",
+    "choose_your_mode",
+    "current_mode_button",
+    "deep_research_start_message",
+    "deep_search_start_message",
+    "error_fast_reply_chinese",
+    "error_fast_reply_empty",
+    "error_generic",
+    "error_message_too_long",
+    "error_no_context",
+    "error_no_steps",
+    "error_timeout",
+    "keep_language_button",
+    "language_selection_prompt",
+    "language_updated",
+    "mode_deep_research",
+    "mode_deep_search",
+    "mode_deepseek_r1",
+    "mode_fast_reply",
+    "mode_switched_to",
+    "mode_web",
+    "sources_label",
+    "trying_fast_reply",
+    "waiting_in_queue",
+    "welcome_new_user",
+}
+
+
+class TranslationContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.translations = json.loads(TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+
+    def test_all_locales_keep_the_fixed_language_and_key_baseline(self) -> None:
+        self.assertEqual(set(self.translations), EXPECTED_LANGUAGES)
+        self.assertEqual(set(self.translations["en"]), EXPECTED_KEYS)
+
+        mismatches = {
+            language: {
+                "missing": sorted(EXPECTED_KEYS - set(messages)),
+                "extra": sorted(set(messages) - EXPECTED_KEYS),
+            }
+            for language, messages in self.translations.items()
+            if set(messages) != EXPECTED_KEYS
+        }
+        self.assertFalse(mismatches, mismatches)
+
+    def test_translations_are_non_empty_and_keep_format_placeholders(self) -> None:
+        formatter = string.Formatter()
+        expected_placeholders = {
+            key: {field_name for _, field_name, _, _ in formatter.parse(value) if field_name}
+            for key, value in self.translations["en"].items()
+        }
+
+        errors: dict[str, dict[str, object]] = {}
+        for language, messages in self.translations.items():
+            for key, value in messages.items():
+                actual_placeholders = {
+                    field_name for _, field_name, _, _ in formatter.parse(value) if field_name
+                }
+                if not value.strip() or actual_placeholders != expected_placeholders[key]:
+                    errors[f"{language}.{key}"] = {
+                        "empty": not value.strip(),
+                        "expected_placeholders": sorted(expected_placeholders[key]),
+                        "actual_placeholders": sorted(actual_placeholders),
+                    }
+
+        self.assertFalse(errors, errors)
+
+
+if __name__ == "__main__":
+    unittest.main()
