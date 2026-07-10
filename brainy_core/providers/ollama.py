@@ -136,6 +136,9 @@ class OllamaProvider:
             ],
             "max_tokens": request.max_output_tokens,
             "temperature": request.temperature,
+            # Gemma 4 can emit a long hidden reasoning trace by default. Brainy's
+            # local fast path prioritizes the visible answer and has no reasoning UI.
+            "reasoning_effort": "none",
             "stream": False,
         }
         started = time.monotonic()

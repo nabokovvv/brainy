@@ -78,10 +78,9 @@ WEB_ENABLED_DEFAULT=false
 SEARCH_BACKEND=disabled
 ```
 
-`OLLAMA_MODEL=gemma4:e2b` is only a provisional owner-provided name. Before relying
-on it, run `ollama list` on the target Mac and replace it with the exact installed
-Gemma tag. Do not enable web yet: a production-safe, zero-cost backend has not been
-integrated.
+`OLLAMA_MODEL=gemma4:e2b` is confirmed on the target Mac mini. Its first 8K/32K/64K
+single-user baseline is recorded in [the Mac mini benchmark](docs/MAC_MINI_BENCHMARK_BASELINE.md).
+Do not enable web yet: a production-safe, zero-cost backend has not been integrated.
 
 Never commit `.env`, tokens, API keys, or real user data.
 

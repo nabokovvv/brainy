@@ -183,10 +183,17 @@ Stage 2 adapter отсутствует, Web snapshot отвечает локал
 и не подменяется local inference. Durable persistence между рестартами остаётся Stage
 4 задачей.
 
+На target Mac mini подтверждены exact `gemma4:e2b`, key-based SSH и initial
+single-user 8K/32K/64K baseline без нового swap; результаты в
+`MAC_MINI_BENCHMARK_BASELINE.md`. Это не закрывает Stage 1 gate: нужны full-context,
+multilingual, concurrency и Whisper combined-memory прогоны.
+
 - [x] Заменить четыре режима одним чатом и явным session-persistent переключателем
   `Web OFF/ON`; никакого LLM/freshness preflight.
-- Подключить установленную Gemma 4 E2B как benchmark baseline и зафиксировать точный Ollama tag на Mac.
-- Поддержать динамический контекст до 64K; измерить 8K/32K/64K и не отправлять лишний контекст без необходимости.
+- [x] Подключить установленную Gemma 4 E2B как benchmark baseline и зафиксировать
+  точный Ollama tag на Mac.
+- [x] Поддержать динамический context ceiling до 64K; выполнить initial 8K/32K/64K
+  allocation benchmark. Full-context quality/memory validation остаётся open.
 - Реализовать Telegram progressive delivery через Bot API 10.1 Rich Messages/streaming с fallback на обычные entities/HTML.
 - Использовать expandable quotes, structured citations, code/math formatting и уместные бесплатные message effects; не использовать paid broadcasts/Stars.
 - Убрать spaCy, Wikidata, chart generator и тяжёлый reranker из fast path; Whisper сохраняется как поддерживаемый voice path.

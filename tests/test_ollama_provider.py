@@ -96,6 +96,7 @@ class OllamaProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["model"], "gemma-test:latest")
         self.assertEqual(sent["max_tokens"], 123)
         self.assertEqual(sent["messages"][1], {"role": "user", "content": "Question"})
+        self.assertEqual(sent["reasoning_effort"], "none")
         self.assertFalse(sent["stream"])
         self.assertNotIn("api_key", sent)
 
