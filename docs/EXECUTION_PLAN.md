@@ -51,9 +51,11 @@ Stage 0 ещё не закрыт. До exit gate остаются:
 - [x] real smoke Ollama/Whisper подтверждён на Mac mini (`gemma4:e2b`,
   8K/32K/64K, concurrency; whisper.cpp large-v3 combined-memory прогон) — см.
   `MAC_MINI_BENCHMARK_BASELINE.md`.
-- [ ] real smoke Telegram: живой прогон `bot.py` против настоящего Telegram
-  API (не unit/UI-тесты форматирования) ещё не выполнялся ни на одном
-  окружении. Это единственный оставшийся блокер real-smoke части exit gate.
+- [x] real smoke Telegram подтверждён 2026-07-11: живой `bot.py` на Mac mini
+  (`@askbrainy_com_bot`), реальные сообщения через Telegram, latency ~0.8s
+  (короткий ответ) до ~10s (длинный ответ) через local Ollama. Владелец
+  заметил несколько багов/доработок при живом тесте — зафиксировать их
+  отдельно перед закрытием Stage 0/переходом в Stage 1 checkpoint review.
 - завершить characterization и доработку optional research utilities перед их
   подключением к Web ON path (Stage 2 подготовка, не блокер самого Stage 0 →
   Stage 1 перехода, но остаётся open item плана).
