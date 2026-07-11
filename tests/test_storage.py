@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from storage import (
+    AsyncUserSettingsRepo,
     SCHEMA_VERSION,
     SCHEMA_SQL,
     SQLiteUserSettingsRepo,
@@ -174,6 +175,28 @@ class SQLiteUserSettingsRepoTests(unittest.TestCase):
         cur = self.repo._conn.execute("PRAGMA foreign_keys")
         row = cur.fetchone()
         self.assertEqual(row[0], 1)
+
+
+class AsyncUserSettingsRepoTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.tmp = tempfile.NamedTemporaryFile(delete=False)
+        self.tmp.close()
+        self.repo = AsyncUserSettingsRepo(SQLiteUserSettingsRepo(self.tmp.name))
+
+    async def asyncTearDown(self) -> None:
+        await self.repo.close()
+        import os
+
+        os.unlink(self.tmp.name)
+
+    async def test_serialized_repo_persists_preferences(self) -> None:
+        await self.repo.upsert(42, language="ru", web_enabled=True)
+
+        settings = await self.repo.get(42)
+
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.language, "ru")
+        self.assertTrue(settings.web_enabled)
 
 
 class OpenRepoFactoryTests(unittest.TestCase):

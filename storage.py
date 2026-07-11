@@ -6,6 +6,7 @@ No user content is stored — only per-chat preferences.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -186,6 +187,37 @@ class SQLiteUserSettingsRepo:
         self.close()
 
 
+class AsyncUserSettingsRepo:
+    """Serialize SQLite access off the event loop over one shared connection."""
+
+    def __init__(self, repo: SQLiteUserSettingsRepo) -> None:
+        self._repo = repo
+        self._lock = asyncio.Lock()
+
+    async def get(self, chat_id: int) -> Optional[UserSettings]:
+        async with self._lock:
+            return await asyncio.to_thread(self._repo.get, chat_id)
+
+    async def upsert(
+        self,
+        chat_id: int,
+        *,
+        web_enabled: Optional[bool] = None,
+        language: Optional[str] = None,
+    ) -> UserSettings:
+        async with self._lock:
+            return await asyncio.to_thread(
+                self._repo.upsert,
+                chat_id,
+                web_enabled=web_enabled,
+                language=language,
+            )
+
+    async def close(self) -> None:
+        async with self._lock:
+            await asyncio.to_thread(self._repo.close)
+
+
 def open_repo(path: Optional[str] = None) -> UserSettingsRepo:
     """Factory for the active repository. In-memory by default."""
     if path is None:
@@ -197,6 +229,7 @@ __all__ = [
     "UserSettings",
     "UserSettingsRepo",
     "SQLiteUserSettingsRepo",
+    "AsyncUserSettingsRepo",
     "open_repo",
     "SCHEMA_VERSION",
     "SCHEMA_SQL",

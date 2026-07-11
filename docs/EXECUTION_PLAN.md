@@ -442,7 +442,10 @@ Gate:
 
 Цель: безопасная beta на 20–50 пользователей.
 
-- SQLite для user settings, короткого context и durable jobs; миграции и backup policy.
+- [x] SQLite подключён для durable user settings: язык и Web ON/OFF переживают
+  рестарт, доступ вынесен из event loop и сериализован, файл создаётся с mode 0600.
+  Таблица не содержит сообщений или другого пользовательского контента.
+- SQLite для короткого context и durable jobs; миграции и backup policy.
 - Graceful shutdown/restart, healthcheck и launchd service на Mac mini.
 - Rate limiting per user, abuse bounds, queue backpressure.
 - Structured metrics и alerts без пользовательского текста.

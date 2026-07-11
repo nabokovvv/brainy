@@ -71,6 +71,7 @@ class Settings:
     tavily_monthly_limit: int
     serpapi_api_key: str | None
     serpapi_monthly_limit: int
+    user_settings_path: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -126,6 +127,9 @@ class Settings:
             serpapi_monthly_limit=_env_int(
                 source.get("SERPAPI_MONTHLY_LIMIT"), default=200, name="SERPAPI_MONTHLY_LIMIT"
             ),
+            user_settings_path=source.get(
+                "USER_SETTINGS_PATH", "~/.local/state/brainy/settings.sqlite3"
+            ).strip(),
         )
 
     def validate(self, *, require_telegram: bool = False, require_web: bool | None = None) -> None:
@@ -151,6 +155,8 @@ class Settings:
             errors.append("OLLAMA_CONTEXT_TOKENS must be between 1 and 65536")
         if not self.whisper_model.strip():
             errors.append("WHISPER_MODEL must be non-empty")
+        if not self.user_settings_path.strip():
+            errors.append("USER_SETTINGS_PATH must be non-empty")
         if self.whisper_backend not in {"python", "cpp"}:
             errors.append("WHISPER_BACKEND must be 'python' or 'cpp'")
         if self.whisper_backend == "cpp":

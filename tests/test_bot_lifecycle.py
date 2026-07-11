@@ -224,6 +224,27 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse([name for name in removed_handlers if hasattr(bot, name)])
 
+    async def test_settings_hydrate_from_durable_repo_once(self) -> None:
+        class Repo:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def get(self, chat_id: int) -> object:
+                self.calls += 1
+                return SimpleNamespace(language="ru", web_enabled=True)
+
+        repo = Repo()
+        context = SimpleNamespace(
+            chat_data={},
+            application=SimpleNamespace(bot_data={"settings_repo": repo}),
+        )
+
+        await bot._ensure_settings_loaded(context, 42)
+        await bot._ensure_settings_loaded(context, 42)
+
+        self.assertEqual(context.chat_data, {"language": "ru", "web_enabled": True})
+        self.assertEqual(repo.calls, 1)
+
     async def test_settings_reopens_route_and_language_controls(self) -> None:
         telegram_bot = _Bot()
         update = SimpleNamespace(effective_chat=SimpleNamespace(id=42))

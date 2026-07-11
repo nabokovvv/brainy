@@ -10,6 +10,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -48,6 +49,7 @@ from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
 from page_processor import PageFetcher
 from telegram_renderer import RichMessageRenderer, sanitize_untrusted_markdown
+from storage import AsyncUserSettingsRepo, SQLiteUserSettingsRepo
 from utils import strip_think
 
 # ---------------------------------------------------------------------------#
@@ -286,6 +288,46 @@ def _current_route_intent(context: ContextTypes.DEFAULT_TYPE) -> RouteIntent:
     return RouteIntent.WEB if context.chat_data.get("web_enabled", False) else RouteIntent.LOCAL
 
 
+async def _ensure_settings_loaded(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+) -> None:
+    """Hydrate PTB chat_data once without persisting any dialogue content."""
+
+    if "language" in context.chat_data:
+        return
+    repo = context.application.bot_data.get("settings_repo")
+    if repo is not None:
+        try:
+            settings = await repo.get(chat_id)
+        except Exception as exc:
+            logger.error("Settings hydration failed type=%s", type(exc).__name__)
+            return
+        if settings is not None:
+            context.chat_data["language"] = settings.language
+            context.chat_data["web_enabled"] = settings.web_enabled
+
+
+async def _persist_settings(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    *,
+    language: str | None = None,
+    web_enabled: bool | None = None,
+) -> None:
+    repo = context.application.bot_data.get("settings_repo")
+    if repo is None:
+        return
+    try:
+        await repo.upsert(
+            chat_id,
+            language=language,
+            web_enabled=web_enabled,
+        )
+    except Exception as exc:
+        logger.error("Settings persistence failed type=%s", type(exc).__name__)
+
+
 def get_route_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
     translator = context.application.bot_data["translator"]
     key = "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
@@ -364,6 +406,7 @@ def _capture_request_snapshot(
 # ---------------------------------------------------------------------------#
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
+    await _ensure_settings_loaded(context, chat_id)
     user_lang = context.chat_data.get("language")
     translator = context.application.bot_data["translator"]
 
@@ -371,6 +414,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         detected_lang = update.effective_user.language_code
         user_lang = detected_lang if detected_lang in translator.supported_languages else "en"
         context.chat_data["language"] = user_lang
+        await _persist_settings(
+            context,
+            chat_id,
+            language=user_lang,
+            web_enabled=_current_route_intent(context) is RouteIntent.WEB,
+        )
 
         text = translator.get_string("welcome_new_user", user_lang)
         keyboard = get_language_keyboard(context, user_lang)
@@ -392,6 +441,7 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Re-open the persistent route and language controls on demand."""
 
     chat_id = update.effective_chat.id
+    await _ensure_settings_loaded(context, chat_id)
     lang = context.chat_data.get("language", "en")
     translator = context.application.bot_data["translator"]
     status_key = (
@@ -444,6 +494,9 @@ async def _handle_feedback_callback(
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    effective_chat = getattr(update, "effective_chat", None)
+    chat_id = effective_chat.id if effective_chat is not None else 0
+    await _ensure_settings_loaded(context, chat_id)
     translator = context.application.bot_data["translator"]
     action = query.data
     lang = context.chat_data.get("language", "en")
@@ -454,7 +507,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if action.startswith(f"{ACTION_EXPLORE_SOURCES}_"):
         token = action[len(f"{ACTION_EXPLORE_SOURCES}_") :]
-        exploration = source_exploration_store.pop(token, chat_id=update.effective_chat.id)
+        exploration = source_exploration_store.pop(token, chat_id=chat_id)
         if exploration is None:
             await query.answer(text=translator.get_string("explore_sources_expired", lang))
             return
@@ -464,7 +517,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except BadRequest:
             pass
         chat_locks = context.application.bot_data.setdefault("chat_locks", {})
-        chat_lock = chat_locks.setdefault(update.effective_chat.id, asyncio.Lock())
+        chat_lock = chat_locks.setdefault(chat_id, asyncio.Lock())
         async with chat_lock:
             await grounded_web_reply_handler(
                 update,
@@ -484,6 +537,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     elif action.startswith(f"{ACTION_SET_LANGUAGE}_"):
         new_lang = action.replace(f"{ACTION_SET_LANGUAGE}_", "")
         context.chat_data["language"] = new_lang
+        await _persist_settings(context, chat_id, language=new_lang)
         status_key = (
             "web_status_on"
             if _current_route_intent(context) is RouteIntent.WEB
@@ -497,6 +551,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     elif action == ACTION_TOGGLE_WEB:
         context.chat_data["web_enabled"] = _current_route_intent(context) is RouteIntent.LOCAL
+        await _persist_settings(
+            context,
+            chat_id,
+            web_enabled=context.chat_data["web_enabled"],
+        )
         status_key = (
             "web_status_on"
             if _current_route_intent(context) is RouteIntent.WEB
@@ -510,6 +569,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     elif action in {"web", "deep_research", "fast_reply", "deep_search", "deepseek_r1"}:
         # Old inline keyboards may survive a deploy. Preserve their route intent.
         context.chat_data["web_enabled"] = action in {"web", "deep_research", "deep_search"}
+        await _persist_settings(
+            context,
+            chat_id,
+            web_enabled=context.chat_data["web_enabled"],
+        )
         status_key = "web_status_on" if context.chat_data["web_enabled"] else "web_status_off"
         await query.edit_message_text(
             text=translator.get_string(status_key, lang),
@@ -621,6 +685,7 @@ def _clean_text_for_plain_send(text: str) -> str:
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
+    await _ensure_settings_loaded(context, chat_id)
     if "language" not in context.chat_data:
         await start(update, context)
         return
@@ -1014,6 +1079,7 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
 # ---------------------------------------------------------------------------#
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
+    await _ensure_settings_loaded(context, chat_id)
     message_text = update.message.text
     if not message_text:
         return
@@ -1418,6 +1484,10 @@ async def _best_effort_cleanup(label: str, operation) -> None:
 async def main_async() -> None:
     config.SETTINGS.validate(require_telegram=True)
     logger.info("Using local Ollama provider")
+    settings_path = Path(config.SETTINGS.user_settings_path).expanduser()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_repo = AsyncUserSettingsRepo(SQLiteUserSettingsRepo(str(settings_path)))
+    settings_path.chmod(0o600)
     translator = Translator("translations.json")
     request_queue = StablePriorityQueue(maxsize=100)
     llm_semaphore = asyncio.Semaphore(1)
@@ -1471,6 +1541,7 @@ async def main_async() -> None:
     )
 
     application.bot_data["translator"] = translator
+    application.bot_data["settings_repo"] = settings_repo
     application.bot_data["request_queue"] = request_queue
     application.bot_data["chat_locks"] = {}
     application.bot_data["llm_semaphore"] = llm_semaphore
@@ -1555,6 +1626,7 @@ async def main_async() -> None:
             await _best_effort_cleanup("search_client.close", search_client.aclose)
         if page_client is not None:
             await _best_effort_cleanup("page_client.close", page_client.close)
+        await _best_effort_cleanup("settings_repo.close", settings_repo.close)
         if application_initialized:
             await _best_effort_cleanup("application.shutdown", application.shutdown)
         logger.info("Bot has been shut down.")
