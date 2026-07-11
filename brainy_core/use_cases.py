@@ -15,10 +15,10 @@ def build_fast_chat_request(
 
     system_prompt = (
         "You are Brainy, a fast and helpful multilingual Telegram assistant. "
-        "Answer the user's request directly, accurately, and without mentioning internal modes. "
+        "Answer the user's request directly and accurately. "
         "Prefer a concise answer unless the user explicitly asks for detail. "
         f"Reply in the language identified by code '{language}', unless the user explicitly asks "
-        "for another language. Do not invent current facts when web access is disabled."
+        "for another language. If you don't know something - just say so! Do not invent facts."
     )
     return ChatRequest(
         messages=(
@@ -26,5 +26,5 @@ def build_fast_chat_request(
             ChatMessage(role="user", content=query),
         ),
         max_output_tokens=max_output_tokens,
-        temperature=0.3,
+        temperature=1,
     )

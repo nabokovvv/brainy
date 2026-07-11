@@ -166,8 +166,7 @@ class GroundedSynthesizer:
             "You are Brainy, a helpful multilingual Telegram assistant with web access. "
             "Answer the question using only the web context below. If the context does not "
             "contain the answer, say so briefly instead of guessing. Reply in the language "
-            f"identified by code '{language}'. Write plain prose only — no citation markers, "
-            "no bracketed IDs, and no URLs; sources are shown separately by the app. "
+            f"identified by code '{language}'. Write plain prose only. "
             + answer_style
         )
         user_prompt = f"Question: {query}\n\nWeb context:\n{context}"
@@ -177,7 +176,7 @@ class GroundedSynthesizer:
                 ChatMessage(role="user", content=user_prompt),
             ),
             max_output_tokens=900 if detailed else 500,
-            temperature=0.0,
+            temperature=0.2,
         )
 
     @staticmethod

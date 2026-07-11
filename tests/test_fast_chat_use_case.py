@@ -12,7 +12,7 @@ class FastChatUseCaseTests(unittest.TestCase):
         self.assertEqual(request.max_output_tokens, 256)
         self.assertEqual(request.messages[0].role, "system")
         self.assertIn("'ru'", request.messages[0].content)
-        self.assertIn("internal modes", request.messages[0].content)
+        self.assertIn("Do not invent facts", request.messages[0].content)
         self.assertEqual(request.messages[1].content, "Как дела?")
 
     def test_request_rejects_empty_user_text(self) -> None:
