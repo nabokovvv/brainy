@@ -29,7 +29,14 @@ from telegram.ext import (
 )
 
 import config
-from brainy_core import ProviderError, RouteIntent, build_fast_chat_request
+from brainy_core import (
+    GroundedSynthesizer,
+    ProviderError,
+    RouteIntent,
+    SearchGateway,
+    SearchQuery,
+    build_fast_chat_request,
+)
 from brainy_core.feedback import FeedbackEntry, FeedbackStore
 from brainy_core.providers import DuckDuckGoProvider, OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
@@ -714,6 +721,43 @@ async def fast_reply_handler(
         await asyncio.gather(draft_task, return_exceptions=True)
 
 
+async def grounded_web_reply_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, query: str, *, language: str
+) -> None:
+    """Run the provider-neutral Web ON orchestration and render its citations."""
+    translator = context.application.bot_data["translator"]
+    gateway = context.application.bot_data.get("search_gateway")
+    synthesizer = context.application.bot_data.get("grounded_synthesizer")
+    if gateway is None or synthesizer is None:
+        await update.message.reply_text(translator.get_string("web_unavailable", language))
+        return
+
+    try:
+        bundle = await gateway.build_bundle(SearchQuery(query=query, language=language))
+        if not bundle.items:
+            await update.message.reply_text(translator.get_string("web_unavailable", language))
+            return
+        grounded = await synthesizer.synthesize(query, language, bundle)
+        sources = "\n".join(
+            f"[{item.evidence_id}]({item.canonical_url})" for item in grounded.citations
+        )
+        answer = grounded.answer if not sources else f"{grounded.answer}\n\n{sources}"
+        renderer = context.application.bot_data.get("rich_message_renderer")
+        if renderer is not None and await renderer.send_final(
+            context.bot, chat_id=update.effective_chat.id, answer=answer, badge="🌐 Live"
+        ):
+            return
+        await send_long_message(
+            update, escape_markdown_v2(answer), parse_mode=ParseMode.MARKDOWN_V2
+        )
+    except (ProviderError, ValueError) as exc:
+        logger.warning("Grounded web reply failed type=%s", type(exc).__name__)
+        await update.message.reply_text(translator.get_string("web_unavailable", language))
+    except Exception as exc:
+        logger.error("Grounded web reply failed type=%s", type(exc).__name__)
+        await update.message.reply_text(translator.get_string("web_unavailable", language))
+
+
 # ---------------------------------------------------------------------------#
 #                         Core Logic (Worker)                                #
 # ---------------------------------------------------------------------------#
@@ -763,8 +807,11 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
             chat_locks = app_data["chat_locks"]
             chat_lock = chat_locks.setdefault(chat_id, asyncio.Lock())
             async with chat_lock:
+                # Keep worker-level tests and lightweight adapters compatible with
+                # contexts that only provide the minimum application data.
+                context.application.bot_data.setdefault("translator", translator)
                 if route_intent is RouteIntent.WEB:
-                    await update.message.reply_text(translator.get_string("web_unavailable", lang))
+                    await grounded_web_reply_handler(update, context, query, language=lang)
                 else:
                     await fast_reply_handler(update, context, query, language=lang)
 
@@ -1252,6 +1299,12 @@ async def main_async() -> None:
     application.bot_data["whisper_transcriber"] = whisper_transcriber
     application.bot_data["inference_provider"] = inference_provider
     application.bot_data["search_provider"] = search_provider
+    application.bot_data["search_gateway"] = (
+        SearchGateway(search_provider) if search_provider is not None else None
+    )
+    application.bot_data["grounded_synthesizer"] = (
+        GroundedSynthesizer(inference_provider) if search_provider is not None else None
+    )
     application.bot_data["rich_message_renderer"] = RichMessageRenderer(
         enabled=config.TELEGRAM_RICH_MESSAGES
     )
