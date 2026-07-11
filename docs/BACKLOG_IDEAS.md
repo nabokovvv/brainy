@@ -8,11 +8,21 @@
 Любая идея отсюда должна пройти обычный цикл: scope, acceptance criteria,
 тест/benchmark, отдельная ветка `codex/<issue>-<slug>`, review, commit.
 
-## Idea: 👍/👎 feedback без хранения текста диалогов
+## Idea: 👍/👎 feedback без хранения текста диалогов — реализовано
 
 Полный дизайн (event schema, privacy-риски, локализация, acceptance tests,
-минимальный slice) — в `docs/FEEDBACK_DESIGN.md`. Готов к превращению в slice
-после закрытия Stage 0.
+минимальный slice) — в `docs/FEEDBACK_DESIGN.md`. Реализовано в `bot.py` +
+`brainy_core/feedback.py` (commits `1b46083`, `5c21503`, `c3dc657`), отмечено
+в `EXECUTION_PLAN.md` Stage 1. Оставлено здесь как ссылка на дизайн-документ.
+
+## Idea: выбор персоны и multi-turn memory — остаются отложены
+
+Ниже (персона, персона-выбор) и multi-turn memory (см. `EXECUTION_PLAN.md`
+проблема "Бот не хранит историю сообщений") — обе идеи ждут закрытия Stage 0
+exit gate (`EXECUTION_PLAN.md:49-58`: real smoke Ollama/Whisper/Telegram,
+self-hosted runner registration, dependency audit CI step). Не превращать в
+slice до этого момента — правило `PRODUCT_STRATEGY.md`/`AGENTS.md` не
+расширять публичный MVP пока quality gates текущего Stage не закрыты.
 
 ## Idea: выбор персоны (personality) при старте бота
 

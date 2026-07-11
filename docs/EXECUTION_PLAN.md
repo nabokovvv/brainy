@@ -244,6 +244,10 @@ Full-context retention smoke прошёл на фактических
   При ambiguous transport failure принят delivery-first компромисс: без idempotency key
   редкий duplicate final допустим, потеря готового ответа — нет.
 - Использовать expandable quotes, structured citations, code/math formatting и уместные бесплатные message effects; не использовать paid broadcasts/Stars.
+- Source badge для Web ON: нет что делать в этом slice — Web ON path не реализован
+  до Stage 2 (`SearchProvider`/`EvidenceBundle`, см. ниже), источников для бейджа
+  пока не существует. Не считать открытой задачей Stage 1; вернуться к этому,
+  когда Stage 2 добавит реальные citation IDs.
 - Убрать spaCy, Wikidata, chart generator и тяжёлый reranker из fast path; Whisper сохраняется как поддерживаемый voice path.
 - Зафиксировать точный установленный tag Gemma на Mac и использовать его как первый local benchmark candidate.
 - [x] Добавить latency badge и feedback button (👍/👎, sampled every 8-12 replies,
