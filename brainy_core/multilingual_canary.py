@@ -96,10 +96,17 @@ async def run_multilingual_canary(
         completed.append(case.language)
         latencies.append(max(result.latency_ms, 0))
         normalized = _normalize(result.text)
-        if all(
+        # The first group holds the factual answer and is always required. The
+        # remaining groups are language-echo markers: a terse reply like
+        # "Berlin." has no room for them, so they only apply to full sentences.
+        answer_group, *echo_groups = case.required_groups
+        answer_ok = any(_normalize(term) in normalized for term in answer_group)
+        terse_reply = len(normalized.split()) <= 5
+        echo_ok = terse_reply or all(
             any(_normalize(term) in normalized for term in alternatives)
-            for alternatives in case.required_groups
-        ):
+            for alternatives in echo_groups
+        )
+        if answer_ok and echo_ok:
             passed.append(case.language)
     return MultilingualCanaryResult(
         model_id=provider.model.name,

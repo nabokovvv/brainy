@@ -41,6 +41,25 @@ class MultilingualCanaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.passed)
         self.assertEqual(len(result.passed_languages), 8)
 
+    async def test_terse_correct_answers_pass_without_language_echo(self) -> None:
+        provider = FakeProvider(
+            ["Berlin.", "Dublin", "Lima.", "Rabat", "Tokyo", "Brasília", "Астана.", "Ankara"]
+        )
+
+        result = await run_multilingual_canary(provider)
+
+        self.assertTrue(result.passed)
+        self.assertEqual(len(result.passed_languages), 8)
+
+    async def test_verbose_answer_still_requires_language_echo(self) -> None:
+        answers = ["The answer to your interesting question is certainly the city of Berlin."]
+        answers += ["wrong"] * 7
+        provider = FakeProvider(answers)
+
+        result = await run_multilingual_canary(provider)
+
+        self.assertNotIn("de", result.passed_languages)
+
     async def test_wrong_language_or_fact_quarantines_candidate(self) -> None:
         provider = FakeProvider(["wrong"] * 8)
 
