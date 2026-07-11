@@ -12,13 +12,14 @@ topic discovery
   -> safe research + evidence bundle
   -> English draft
   -> deterministic and editorial QA
-  -> Git pull request + preview
-  -> approved publish
+  -> automatic quality gates
+  -> scheduled publish
   -> asynchronous translations
   -> locale QA + publish
 ```
 
-Источник истины — Markdown и metadata в Git. Целевой генератор сайта — Astro,
+Источник истины — Markdown и metadata в Git в новом **private** repository.
+Целевой генератор сайта — Astro,
 хостинг — Cloudflare static hosting. Для нового проекта предпочтительны Workers
 Static Assets; если аудит Cloudflare account подтвердит, что текущий проект уже
 работает через Pages, можно сохранить Pages. Отдельная database-backed CMS в первом
@@ -29,6 +30,19 @@ Pipeline не читает пользовательские разговоры B
 Telegram-бота и не делит с ним необозначенную внешнюю квоту. Он может переиспользовать
 provider-neutral inference/search contracts и безопасный page fetcher Brainy как
 библиотечные компоненты.
+
+### Repository boundary
+
+- публичный `brainy` остаётся кодом Telegram-бота и публичной policy/documentation;
+- публичный `AskBrainyWebsite` остаётся immutable legacy archive и rollback source;
+- создаётся новый private GitHub repository `askbrainy-publisher` (название можно
+  поменять до создания): Astro source, Markdown content, pipeline code, prompts,
+  job ledger schema, provider configuration and deployment infrastructure живут
+  только там;
+- Cloudflare получает доступ к private repo для build/deploy, но опубликованный
+  static site остаётся публичным;
+- общие безопасные contracts можно позже вынести в public package, но private
+  publisher никогда не зависит от публикации prompts или editorial workflow.
 
 ## Context
 
@@ -60,9 +74,9 @@ production без переписывания.
 - Astro static site;
 - TypeScript content schema с runtime validation;
 - Markdown/MDX content в Git;
-- Cloudflare preview для каждой pull request;
-- Cloudflare production deploy только после merge;
-- GitHub pull request как publish boundary;
+- Cloudflare preview для code changes и pre-publish content build;
+- Cloudflare production deploy только после successful verified content commit;
+- private Git history и CI как audit/rollback boundary;
 - локальный Mac mini runner для generation/translation jobs, когда нужна Ollama;
 - Cloudflare/GitHub scheduled job только для лёгких discovery-задач без секретного
   или локального model runtime.
@@ -90,7 +104,8 @@ Decap CMS остаётся обратимым optional layer, если появ�
 
 - English: `/{legacy-slug}`;
 - другие локали: `/{locale}/{legacy-slug}`;
-- старые category/tag/archive paths либо воспроизводятся, либо получают явные 301;
+- category/tag/archive paths best-effort: их можно не переносить, а старые URL
+  допускается отправлять на локализованный archive/home;
 - `.html` aliases проверяются и при необходимости получают redirect;
 - новые статьи могут использовать локализованные slugs только при наличии общей
   `translationKey` и корректных reciprocal `hreflang`;
@@ -106,8 +121,7 @@ discovered
   -> researched
   -> drafted
   -> verified
-  -> review_ready
-  -> approved
+  -> automatically_verified
   -> scheduled
   -> published_en
   -> translating
@@ -154,12 +168,16 @@ sources:
 ```
 
 Дополнительные поля: `legacyUrl`, `featuredImage`, image license/provenance,
-`riskLevel`, `reviewedBy` и `reviewedAt`. Canonical URL и `hreflang` выводятся из
+`riskLevel`, `publishedBy: automation` и `automationDecision`. Canonical URL и `hreflang` выводятся из
 route manifest, чтобы metadata не расходилась с реальными routes.
 
-В публичном author block указывается Brainy и фактически использованные модели.
-Нельзя утверждать human review, если его не было. Raw prompts, полные страницы и
-скопированный competitor text в Git не сохраняются.
+В публичном author block указывается Brainy. Рядом выводится проверяемая карточка
+provenance: `Research: provider/model`, `Draft: provider/model`,
+`Translation: provider/model`, pipeline version и дата. Модель берётся только из
+зафиксированного run manifest: нельзя назвать модель, которая фактически не
+участвовала. Author bio становится единым site-wide block; уникальные legacy bios
+не являются migration gate. Raw prompts, полные страницы и скопированный competitor
+text в Git не сохраняются.
 
 ## Topic discovery
 
@@ -172,16 +190,26 @@ title, url, source, observed_at, rank, engagement, locale, tags, license_hint
 Начальный бесплатный набор:
 
 - Hacker News API и официальные RSS;
-- Reddit только через разрешённый OAuth/Data API, без HTML scraping;
+- Reddit только через разрешённый OAuth/Data API, без HTML scraping: allowlist из
+  10 subreddits, `hot/new` metadata, ETag/cache/jitter, no comment-body storage;
 - Google News/Trends только через публично разрешённый feed/API и только как
   discovery signal;
 - GitHub releases/search и официальные vendor/research RSS;
 - arXiv API/RSS для research topics;
-- Exploding Topics public editorial posts как optional seed, без копирования текста.
+- YouTube Data API metadata и official channel feeds как discovery signal;
+- Exploding Topics public monthly `trending-topics` post как low-frequency seed,
+  без копирования текста или изображений.
 
 Каждый adapter имеет rate limit, timeout, cache, user-agent/contact, robots/terms
 policy и выключается отдельно. Неофициальный scraper, который обходит access
 controls или создаёт непредсказуемый legal/operational risk, в production не входит.
+
+Reddit poll запускается каждые 15 минут с jitter; пяти минут допускаются только
+после подтверждения актуального API quota и при conditional requests. Reddit —
+сигнал интереса, не источник фактов. Arbitrary third-party YouTube videos не
+скачиваются и не транскрибируются: captions API требует авторизованный доступ к
+caption track. Видео можно цитировать по публичным metadata/официальной странице;
+полный transcript разрешён только для ролика Brainy либо при явном разрешении автора.
 
 Темы deduplicate по canonical URL и semantic similarity, затем оцениваются по:
 
@@ -195,7 +223,21 @@ controls или создаёт непредсказуемый legal/operational 
 Приоритет новой редакционной ниши: local AI, privacy, web research, Telegram
 productivity, practical AI tooling и понятные технические объяснения. Finance,
 medical, legal, gambling и иные high-stakes/YMYL темы не публикуются автоматически;
-для них обязательны authoritative sources и human approval.
+они идут в quarantine до отдельного решения владельца.
+
+### Novelty and deduplication
+
+До research и до любой LLM generation candidate сверяется с published corpus по
+normalized entity + intent + locale-independent `topicKey`, lexical BM25 и local
+embedding similarity title/summary. Candidate блокируется, если уже есть та же
+задача/сущность или semantic similarity выше установленного threshold; причина и
+ссылка на существующую статью остаются в job ledger.
+
+Годовой refresh допускается, только когда в title/intent есть новый период
+(`2026` после `2025`), прошлой статье достаточно времени, и новый evidence pack
+демонстрирует material change: минимум три новых primary sources либо существенное
+изменение фактов/версий/рынка. Такой материал обязан ссылаться на предыдущий обзор,
+а не маскироваться под новую независимую статью.
 
 ## Research and writing
 
@@ -249,7 +291,7 @@ English-версию.
 
 ## Quality gates
 
-Статья не может перейти в `approved`, если не выполнены:
+Статья не может перейти в `automatically_verified`, если не выполнены:
 
 - schema/frontmatter validation;
 - минимум два независимых источника для проверяемых claims;
@@ -265,9 +307,11 @@ English-версию.
 - preview smoke проверяет page, language switch, canonical, `hreflang`, JSON-LD,
   sitemap и Telegram CTA.
 
-Публикация сначала работает в human-approved canary mode. Полный auto-publish
-разрешается отдельно только после измеренного периода без P0/P1 ошибок. Даже тогда
-high-risk темы остаются manual-only.
+Публикация автономна: успешно прошедшая low-risk статья автоматически коммитится,
+build/preview проверяется и затем публикуется scheduler'ом. Нет human approval step.
+Вместо него действуют quarantine, one-article daily cap на старте, hard kill switch,
+идемпотентность и automatic rollback при deployment/validation failure. High-risk
+темы никогда не обходят quarantine.
 
 ## Migration plan
 
@@ -278,12 +322,15 @@ high-risk темы остаются manual-only.
 2. Парсить только semantic containers текущего Flex/Pelican HTML: article header,
    body, source list, author block, category, tags и locale switcher.
 3. Связать восемь языковых версий общим `translationKey`, используя legacy slug.
-4. Скопировать только реально используемые local images и записать provenance.
+4. Скопировать все используемые article images, если локальный asset доступен, и
+   записать provenance; отсутствующий/неиспользуемый asset — warning, не blocker.
 5. Преобразовать Donate/Terms отдельно от articles.
-6. Создать category/tag mapping для каждой локали.
+6. Создать category/tag mapping только как best-effort navigation; legacy taxonomy
+   URLs не являются content migration gate.
 7. Сгенерировать Astro content и route manifest.
 8. Сравнить normalized rendered body с legacy HTML и сохранить migration report.
-9. Проверить все sitemap URLs и aliases на 200/expected 301.
+9. Проверить 80 article documents, 16 legal/page documents, CTA и использованные
+   images; legacy taxonomy проверяется отдельно как non-blocking report.
 10. Переключать production только после preview review и сохранённого rollback.
 
 Legacy repository/commit остаётся immutable rollback snapshot. Старые HTML не
@@ -297,6 +344,7 @@ Acceptance criteria:
 
 - этот ADR принят;
 - зафиксирован полный legacy URL/content/assets manifest;
+- выбран и создан private repository boundary до добавления publisher code;
 - известен фактический Cloudflare deployment source;
 - выбран Pages-retain или Workers Static Assets с зафиксированной причиной;
 - production DNS/deploy не менялись.
@@ -309,7 +357,7 @@ Acceptance criteria:
 
 - pinned Node/package manager и lockfile;
 - typed content collection;
-- старые URLs для четырёх страниц совпадают;
+- старые article URLs для четырёх страниц совпадают;
 - canonical, reciprocal `hreflang`, `x-default`, sitemap, RSS и Article JSON-LD;
 - language switch и Telegram CTA работают;
 - deterministic migration report;
@@ -321,13 +369,13 @@ Acceptance criteria:
 Acceptance criteria:
 
 - все 10 статей × 8 локалей и 2 legal pages × 8 локалей перенесены;
-- используемые images не потеряны;
-- все 232 существующих routes сохранены или redirect-tested;
+- CTA и все доступные используемые article images перенесены;
+- category/tag/archive migration выпускает report, но не блокирует cutover;
 - старый и новый normalized article body эквивалентны;
 - route/canonical/hreflang matrix green;
 - production ещё не переключён.
 
-### Slice W3 — pipeline core, manual topic input
+### Slice W3 — pipeline core, automatic low-risk topic input
 
 Scope: безопасный research/write pipeline для заданной темы, без cron и publish.
 
@@ -337,7 +385,7 @@ Acceptance criteria:
 - fake providers и recorded HTTP fixtures;
 - safe fetch/prompt injection/citation/price fail-closed tests;
 - facts -> outline -> draft -> QA resume;
-- output — draft PR-ready Markdown, не production content;
+- output — verified publish-ready Markdown с actual model provenance;
 - никаких сетевых запросов в обычных тестах.
 
 ### Slice W4 — discovery adapters and scoring
@@ -348,17 +396,19 @@ Acceptance criteria:
 - normalized `TopicSignal`, dedupe и score explanation;
 - rate limit/cache/terms controls;
 - YMYL auto-publish prohibition;
-- weekly shortlist report без автоматического article generation.
+- Reddit official API adapter and Exploding Topics monthly adapter с terms/cache policy;
+- YouTube metadata-only adapter; no third-party transcript harvesting;
+- novelty/deduplication gate до research и drafting.
 
-### Slice W5 — PR publishing canary
+### Slice W5 — autonomous publishing canary
 
 Acceptance criteria:
 
-- idempotent branch/PR creation;
-- preview URL и QA report в PR;
-- human approval обязателен;
-- merge/publish status проверяется, а не предполагается;
-- retry не создаёт duplicate PR/article;
+- idempotent content commit and deploy request from the private repository;
+- preview/build/QA result фиксируется в job ledger;
+- no human approval step for low-risk content;
+- publish status проверяется, а не предполагается;
+- retry не создаёт duplicate article;
 - rollback документирован.
 
 ### Slice W6 — asynchronous translations
@@ -380,11 +430,11 @@ Acceptance criteria:
 - запуск только в разрешённые окна и с учётом загрузки Ollama;
 - structured metrics без article body/raw page text в логах;
 - external quotas учитываются отдельно от Telegram bot;
-- auto-publish по умолчанию выключен.
+- auto-publish включён только для `automatically_verified` low-risk content.
 
-### Slice W8 — optional bounded auto-publish
+### Slice W8 — autonomous volume ramp
 
-Разрешается только отдельным решением владельца после canary. Acceptance criteria:
+Acceptance criteria:
 
 - достаточно большой reviewed sample без P0/P1 defects;
 - только low-risk niche и allowlisted source classes;
@@ -395,7 +445,7 @@ Acceptance criteria:
 ## First implementation order
 
 Начать с `W0 -> W1`. Не подключать cron, Reddit/Google scraping, массовую миграцию
-или auto-merge до green proof of concept. После W1 решение об Astro обратимо: Markdown
+или uncontrolled crawling до green proof of concept. После W1 решение об Astro обратимо: Markdown
 и migration manifest можно перенести в Hugo или другой static generator без потери
 контента.
 
@@ -439,6 +489,5 @@ Acceptance criteria:
 - push новой branch или pull request;
 - preview/production deploy и привязка Cloudflare account;
 - изменение DNS/custom domain;
-- auto-merge/auto-publish;
 - новые внешние credentials или передача данных third-party provider;
 - расходы, платные endpoints или изменение privacy policy.
