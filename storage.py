@@ -11,9 +11,9 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-SCHEMA_SQL = f"""
+SCHEMA_SQL = """
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -21,17 +21,20 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY
 );
 
-INSERT OR IGNORE INTO schema_version (version) VALUES ({SCHEMA_VERSION});
-
 CREATE TABLE IF NOT EXISTS user_settings (
     chat_id INTEGER PRIMARY KEY,
     web_enabled INTEGER NOT NULL DEFAULT 0,
     language TEXT NOT NULL DEFAULT 'en',
+    persona TEXT NOT NULL DEFAULT 'assistant',
     updated_at REAL NOT NULL
 );
 """
 
-MIGRATION_SQL: dict[int, str] = {}
+MIGRATION_SQL: dict[int, str] = {
+    2: """
+    ALTER TABLE user_settings ADD COLUMN persona TEXT NOT NULL DEFAULT 'assistant';
+    """,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,7 @@ class UserSettings:
     chat_id: int
     web_enabled: bool
     language: str
+    persona: str
     updated_at: float
 
 
@@ -57,6 +61,7 @@ class UserSettingsRepo:
         *,
         web_enabled: Optional[bool] = None,
         language: Optional[str] = None,
+        persona: Optional[str] = None,
     ) -> UserSettings:
         now = time.time()
         existing = self._store.get(chat_id)
@@ -65,6 +70,7 @@ class UserSettingsRepo:
                 chat_id=chat_id,
                 web_enabled=web_enabled if web_enabled is not None else False,
                 language=language if language is not None else "en",
+                persona=persona if persona is not None else "assistant",
                 updated_at=now,
             )
         else:
@@ -72,6 +78,7 @@ class UserSettingsRepo:
                 chat_id=chat_id,
                 web_enabled=web_enabled if web_enabled is not None else existing.web_enabled,
                 language=language if language is not None else existing.language,
+                persona=persona if persona is not None else existing.persona,
                 updated_at=now,
             )
         self._store[chat_id] = settings
@@ -98,7 +105,20 @@ class SQLiteUserSettingsRepo:
 
     def _init_schema(self) -> None:
         self._conn.executescript(SCHEMA_SQL)
-        self._run_migrations()
+        cur = self._conn.execute("SELECT version FROM schema_version")
+        row = cur.fetchone()
+        if row is None:
+            # Fresh database: schema is already at the latest version.
+            self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+            self._conn.commit()
+            return
+        current_version = row[0]
+        for version in range(current_version + 1, SCHEMA_VERSION + 1):
+            if version in MIGRATION_SQL:
+                self._conn.executescript(MIGRATION_SQL[version])
+        if current_version < SCHEMA_VERSION:
+            self._conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+        self._conn.commit()
 
     def _run_migrations(self) -> None:
         cur = self._conn.execute("SELECT version FROM schema_version")
@@ -113,7 +133,7 @@ class SQLiteUserSettingsRepo:
 
     def get(self, chat_id: int) -> Optional[UserSettings]:
         cur = self._conn.execute(
-            "SELECT chat_id, web_enabled, language, updated_at FROM user_settings WHERE chat_id = ?",
+            "SELECT chat_id, web_enabled, language, persona, updated_at FROM user_settings WHERE chat_id = ?",
             (chat_id,),
         )
         row = cur.fetchone()
@@ -123,7 +143,8 @@ class SQLiteUserSettingsRepo:
             chat_id=row[0],
             web_enabled=bool(row[1]),
             language=row[2],
-            updated_at=row[3],
+            persona=row[3],
+            updated_at=row[4],
         )
 
     def upsert(
@@ -132,6 +153,7 @@ class SQLiteUserSettingsRepo:
         *,
         web_enabled: Optional[bool] = None,
         language: Optional[str] = None,
+        persona: Optional[str] = None,
     ) -> UserSettings:
         now = time.time()
         existing = self.get(chat_id)
@@ -140,6 +162,7 @@ class SQLiteUserSettingsRepo:
                 chat_id=chat_id,
                 web_enabled=web_enabled if web_enabled is not None else False,
                 language=language if language is not None else "en",
+                persona=persona if persona is not None else "assistant",
                 updated_at=now,
             )
         else:
@@ -147,18 +170,26 @@ class SQLiteUserSettingsRepo:
                 chat_id=chat_id,
                 web_enabled=web_enabled if web_enabled is not None else existing.web_enabled,
                 language=language if language is not None else existing.language,
+                persona=persona if persona is not None else existing.persona,
                 updated_at=now,
             )
         self._conn.execute(
             """
-            INSERT INTO user_settings (chat_id, web_enabled, language, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO user_settings (chat_id, web_enabled, language, persona, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 web_enabled = excluded.web_enabled,
                 language = excluded.language,
+                persona = excluded.persona,
                 updated_at = excluded.updated_at
             """,
-            (settings.chat_id, int(settings.web_enabled), settings.language, settings.updated_at),
+            (
+                settings.chat_id,
+                int(settings.web_enabled),
+                settings.language,
+                settings.persona,
+                settings.updated_at,
+            ),
         )
         self._conn.commit()
         return settings
@@ -170,10 +201,12 @@ class SQLiteUserSettingsRepo:
 
     def all(self) -> list[UserSettings]:
         cur = self._conn.execute(
-            "SELECT chat_id, web_enabled, language, updated_at FROM user_settings"
+            "SELECT chat_id, web_enabled, language, persona, updated_at FROM user_settings"
         )
         return [
-            UserSettings(chat_id=r[0], web_enabled=bool(r[1]), language=r[2], updated_at=r[3])
+            UserSettings(
+                chat_id=r[0], web_enabled=bool(r[1]), language=r[2], persona=r[3], updated_at=r[4]
+            )
             for r in cur.fetchall()
         ]
 
@@ -204,6 +237,7 @@ class AsyncUserSettingsRepo:
         *,
         web_enabled: Optional[bool] = None,
         language: Optional[str] = None,
+        persona: Optional[str] = None,
     ) -> UserSettings:
         async with self._lock:
             return await asyncio.to_thread(
@@ -211,6 +245,7 @@ class AsyncUserSettingsRepo:
                 chat_id,
                 web_enabled=web_enabled,
                 language=language,
+                persona=persona,
             )
 
     async def close(self) -> None:

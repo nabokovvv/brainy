@@ -9,6 +9,7 @@ from typing import Awaitable, Callable, Sequence
 from urllib.parse import urlparse
 
 from brainy_core.inference import ChatMessage, ChatRequest, InferenceProvider
+from brainy_core.persona import DEFAULT_PERSONA, with_persona
 from brainy_core.search import SearchProvider, SearchQuery
 
 
@@ -154,6 +155,7 @@ class GroundedSynthesizer:
         bundle: EvidenceBundle,
         *,
         detailed: bool = False,
+        persona: str = DEFAULT_PERSONA,
     ) -> ChatRequest:
         context = "\n\n".join(item.text for item in bundle.items)
         answer_style = (
@@ -162,12 +164,12 @@ class GroundedSynthesizer:
             if detailed
             else "Keep the answer concise unless detail is necessary. "
         )
-        system_prompt = (
+        system_prompt = with_persona(
             "You are Brainy, a helpful multilingual Telegram assistant with web access. "
             "Answer the question using only the web context below. If the context does not "
             "contain the answer, say so briefly instead of guessing. Reply in the language "
-            f"identified by code '{language}'. Write plain prose only. "
-            + answer_style
+            f"identified by code '{language}'. Write plain prose only. " + answer_style,
+            persona,
         )
         user_prompt = f"Question: {query}\n\nWeb context:\n{context}"
         return ChatRequest(

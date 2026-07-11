@@ -38,7 +38,18 @@
     "web_progress_synthesizing": "✍️ Writing the answer…",
     "explore_sources_button": "🔎 Explore sources",
     "explore_sources_started": "Exploring the sources…",
-    "explore_sources_expired": "This source exploration is no longer available."
+    "explore_sources_expired": "This source exploration is no longer available.",
+    "persona_prompt": "Choose a persona:",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Neutral and to the point.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Playful anime-girl, warm and sweet.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Confident best friend who encourages you.",
+    "persona_sarcastic": "Sarcastic rival",
+    "persona_sarcastic_desc": "Sharp rival who teases and critiques.",
+    "persona_invalid": "Unknown persona.",
+    "persona_set": "Persona set to {persona_name}."
   },
   "es": {
     "welcome_new_user": "👋 ¡Hola! Soy Brainy, tu asistente de IA. El idioma está configurado en español. ¿Quieres cambiarlo?",
@@ -79,7 +90,18 @@
     "web_progress_synthesizing": "✍️ Redactando la respuesta…",
     "explore_sources_button": "🔎 Explorar fuentes",
     "explore_sources_started": "Explorando las fuentes…",
-    "explore_sources_expired": "Esta exploración de fuentes ya no está disponible."
+    "explore_sources_expired": "Esta exploración de fuentes ya no está disponible.",
+    "persona_prompt": "Elige una persona:",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Neutral y al grano.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Chica anime juguetona, cálida y dulce.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Mejor amigo seguro que te anima.",
+    "persona_sarcastic": "Rival sarcástico",
+    "persona_sarcastic_desc": "Rival ingenioso que te provoca y critica.",
+    "persona_invalid": "Persona desconocida.",
+    "persona_set": "Persona cambiada a {persona_name}."
   },
   "ru": {
     "welcome_new_user": "👋 Привет! Я Brainy, ваш ИИ‑помощник. Сейчас выбран русский язык. Хотите сменить язык?",
@@ -120,7 +142,18 @@
     "web_progress_synthesizing": "✍️ Формулирую ответ…",
     "explore_sources_button": "🔎 Изучить источники",
     "explore_sources_started": "Изучаю источники…",
-    "explore_sources_expired": "Эта кнопка изучения источников уже недоступна."
+    "explore_sources_expired": "Эта кнопка изучения источников уже недоступна.",
+    "persona_prompt": "Выберите персону:",
+    "persona_assistant": "Ассистент",
+    "persona_assistant_desc": "Нейтрально и по делу.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Игривая девушка-аниме, тепло и мило.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Уверенный лучший друг, который подбадривает.",
+    "persona_sarcastic": "Саркастичный соперник",
+    "persona_sarcastic_desc": "Дерзкий соперник, подкалывает и критикует.",
+    "persona_invalid": "Неизвестная персона.",
+    "persona_set": "Персона установлена: {persona_name}."
   },
   "pt": {
     "welcome_new_user": "👋 Olá! Sou o Brainy, seu assistente de IA. O idioma está definido como português. Quer mudar?",
@@ -161,7 +194,18 @@
     "web_progress_synthesizing": "✍️ Escrevendo a resposta…",
     "explore_sources_button": "🔎 Explorar fontes",
     "explore_sources_started": "Explorando as fontes…",
-    "explore_sources_expired": "Esta exploração de fontes já não está disponível."
+    "explore_sources_expired": "Esta exploração de fontes já não está disponível.",
+    "persona_prompt": "Escolha uma persona:",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Neutra e direta.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Garota anime divertida, carinhosa e doce.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Melhor amigo confiante que te encoraja.",
+    "persona_sarcastic": "Rival sarcástico",
+    "persona_sarcastic_desc": "Rival sarcástico que provoca e critica.",
+    "persona_invalid": "Persona desconhecida.",
+    "persona_set": "Persona definida para {persona_name}."
   },
   "fr": {
     "welcome_new_user": "👋 Salut ! Je suis Brainy, votre assistant IA. La langue est réglée sur le français. Voulez‑vous la changer ?",
@@ -202,7 +246,18 @@
     "web_progress_synthesizing": "✍️ Rédaction de la réponse…",
     "explore_sources_button": "🔎 Explorer les sources",
     "explore_sources_started": "Exploration des sources…",
-    "explore_sources_expired": "Cette exploration des sources n’est plus disponible."
+    "explore_sources_expired": "Cette exploration des sources n’est plus disponible.",
+    "persona_prompt": "Choisissez une persona :",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Neutre et concentrée sur l'essentiel.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Jeune fille anime joueuse, chaleureuse et douce.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Meilleur ami sûr de lui qui t'encourage.",
+    "persona_sarcastic": "Rival sarcastique",
+    "persona_sarcastic_desc": "Rival sarcastique qui taquine et critique.",
+    "persona_invalid": "Persona inconnue.",
+    "persona_set": "Persona définie sur {persona_name}."
   },
   "de": {
     "welcome_new_user": "👋 Hallo! Ich bin Brainy, dein KI‑Assistent. Die Sprache ist auf Deutsch eingestellt. Möchtest du sie ändern?",
@@ -243,7 +298,18 @@
     "web_progress_synthesizing": "✍️ Formuliere die Antwort…",
     "explore_sources_button": "🔎 Quellen untersuchen",
     "explore_sources_started": "Quellen werden untersucht…",
-    "explore_sources_expired": "Diese Quellenanalyse ist nicht mehr verfügbar."
+    "explore_sources_expired": "Diese Quellenanalyse ist nicht mehr verfügbar.",
+    "persona_prompt": "Wähle eine Persona:",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Neutral und sachlich.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Verspieltes Anime-Mädchen, warm und süß.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Selbstbewusster bester Freund, der dich ermutigt.",
+    "persona_sarcastic": "Sarkastischer Rivale",
+    "persona_sarcastic_desc": "Scharfer Rivale, der neckt und kritisiert.",
+    "persona_invalid": "Unbekannte Persona.",
+    "persona_set": "Persona auf {persona_name} gesetzt."
   },
   "tr": {
     "welcome_new_user": "👋 Merhaba! Ben Brainy, yapay zekâ asistanın. Dil Türkçe olarak ayarlı. Değiştirmek ister misiniz?",
@@ -284,7 +350,18 @@
     "web_progress_synthesizing": "✍️ Yanıt yazılıyor…",
     "explore_sources_button": "🔎 Kaynakları incele",
     "explore_sources_started": "Kaynaklar inceleniyor…",
-    "explore_sources_expired": "Bu kaynak incelemesi artık kullanılamıyor."
+    "explore_sources_expired": "Bu kaynak incelemesi artık kullanılamıyor.",
+    "persona_prompt": "Bir persona seçin:",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Tarafsız ve net.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Oyunbaz anime kız, sıcak ve tatlı.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Seni cesaretlendiren özgüvenli en iyi arkadaş.",
+    "persona_sarcastic": "Sert rakip",
+    "persona_sarcastic_desc": "Seninle dalga geçen ve eleştiren sert rakip.",
+    "persona_invalid": "Bilinmeyen persona.",
+    "persona_set": "Persona {persona_name} olarak ayarlandı."
   },
   "id": {
     "welcome_new_user": "👋 Halo! Saya Brainy, asisten AI Anda. Bahasa disetel ke bahasa Indonesia. Ingin menggantinya?",
@@ -325,6 +402,17 @@
     "web_progress_synthesizing": "✍️ Menyusun jawaban…",
     "explore_sources_button": "🔎 Telusuri sumber",
     "explore_sources_started": "Menelusuri sumber…",
-    "explore_sources_expired": "Penelusuran sumber ini sudah tidak tersedia."
+    "explore_sources_expired": "Penelusuran sumber ini sudah tidak tersedia.",
+    "persona_prompt": "Pilih sebuah persona:",
+    "persona_assistant": "Assistant",
+    "persona_assistant_desc": "Netral dan langsung ke inti.",
+    "persona_kawaii": "Kawaii",
+    "persona_kawaii_desc": "Gadis anime ceria, hangat, dan manis.",
+    "persona_bro": "Bro",
+    "persona_bro_desc": "Sahabat terbaik yang percaya diri dan menyemangati.",
+    "persona_sarcastic": "Rival tajam",
+    "persona_sarcastic_desc": "Rival tajam yang menggoda dan mengkritik.",
+    "persona_invalid": "Persona tidak dikenal.",
+    "persona_set": "Persona diatur ke {persona_name}."
   }
 }

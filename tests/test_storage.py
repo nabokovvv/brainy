@@ -7,8 +7,8 @@ import unittest
 
 from storage import (
     AsyncUserSettingsRepo,
+    MIGRATION_SQL,
     SCHEMA_VERSION,
-    SCHEMA_SQL,
     SQLiteUserSettingsRepo,
     UserSettingsRepo,
     open_repo,
@@ -81,6 +81,26 @@ class UserSettingsRepoTests(unittest.TestCase):
         self.assertEqual(self.repo.get(1).language, "en")
         self.assertEqual(self.repo.get(2).language, "ru")
 
+    def test_default_persona_is_assistant(self) -> None:
+        settings = self.repo.upsert(123)
+
+        self.assertEqual(settings.persona, "assistant")
+
+    def test_upsert_updates_persona(self) -> None:
+        self.repo.upsert(123, persona="assistant")
+
+        updated = self.repo.upsert(123, persona="kawaii")
+
+        self.assertEqual(updated.persona, "kawaii")
+
+    def test_upsert_preserves_unset_persona(self) -> None:
+        self.repo.upsert(123, web_enabled=True, language="de", persona="bro")
+
+        updated = self.repo.upsert(123, language="fr")
+
+        self.assertEqual(updated.persona, "bro")
+        self.assertEqual(updated.language, "fr")
+
 
 class SQLiteUserSettingsRepoTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -143,6 +163,31 @@ class SQLiteUserSettingsRepoTests(unittest.TestCase):
 
         self.assertEqual(len(all_settings), 2)
 
+    def test_crud_persists_persona(self) -> None:
+        self.repo.upsert(300, web_enabled=False, language="en", persona="kawaii")
+        settings = self.repo.get(300)
+
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.persona, "kawaii")
+
+    def test_default_persona_is_assistant(self) -> None:
+        self.repo.upsert(301)
+
+        settings = self.repo.get(301)
+
+        self.assertEqual(settings.persona, "assistant")
+
+    def test_persona_persists_across_new_connection(self) -> None:
+        self.repo.upsert(302, persona="bro")
+        self.repo.close()
+
+        new_repo = SQLiteUserSettingsRepo(self.tmp.name)
+        settings = new_repo.get(302)
+        new_repo.close()
+
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.persona, "bro")
+
     def test_context_manager_closes_connection(self) -> None:
         with SQLiteUserSettingsRepo(self.tmp.name) as repo:
             repo.upsert(1)
@@ -190,13 +235,14 @@ class AsyncUserSettingsRepoTests(unittest.IsolatedAsyncioTestCase):
         os.unlink(self.tmp.name)
 
     async def test_serialized_repo_persists_preferences(self) -> None:
-        await self.repo.upsert(42, language="ru", web_enabled=True)
+        await self.repo.upsert(42, language="ru", web_enabled=True, persona="bro")
 
         settings = await self.repo.get(42)
 
         self.assertIsNotNone(settings)
         self.assertEqual(settings.language, "ru")
         self.assertTrue(settings.web_enabled)
+        self.assertEqual(settings.persona, "bro")
 
 
 class OpenRepoFactoryTests(unittest.TestCase):
@@ -221,17 +267,52 @@ class OpenRepoFactoryTests(unittest.TestCase):
 
 
 class MigrationStubTests(unittest.TestCase):
-    def test_migration_dict_empty_for_current_version(self) -> None:
+    def test_migration_2_adds_persona_column(self) -> None:
         from storage import MIGRATION_SQL
 
-        self.assertEqual(MIGRATION_SQL, {})
+        self.assertIn(2, MIGRATION_SQL)
+        self.assertIn("ALTER TABLE user_settings ADD COLUMN persona", MIGRATION_SQL[2])
 
-    def test_schema_version_constant_matches_sql(self) -> None:
-        import re
+    def test_schema_version_constant_matches_latest_migration(self) -> None:
+        # A fresh database initializes to SCHEMA_VERSION; migrations must target
+        # the same version so an older database reaches it after upgrade.
+        self.assertEqual(max(MIGRATION_SQL, default=SCHEMA_VERSION), SCHEMA_VERSION)
 
-        match = re.search(r"VALUES\s*\((\d+)\)", SCHEMA_SQL)
-        self.assertIsNotNone(match)
-        self.assertEqual(int(match.group(1)), SCHEMA_VERSION)
+    def test_v1_database_migrates_to_add_persona(self) -> None:
+        import sqlite3
+
+        from storage import SQLiteUserSettingsRepo
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            conn.executescript(
+                """
+                CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+                INSERT INTO schema_version (version) VALUES (1);
+                CREATE TABLE user_settings (
+                    chat_id INTEGER PRIMARY KEY,
+                    web_enabled INTEGER NOT NULL DEFAULT 0,
+                    language TEXT NOT NULL DEFAULT 'en',
+                    updated_at REAL NOT NULL
+                );
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            repo = SQLiteUserSettingsRepo(tmp_path)
+            repo.upsert(1, web_enabled=True, language="ru", persona="bro")
+            settings = repo.get(1)
+            repo.close()
+            self.assertIsNotNone(settings)
+            self.assertEqual(settings.persona, "bro")
+            self.assertEqual(settings.language, "ru")
+        finally:
+            import os
+
+            os.unlink(tmp_path)
 
 
 if __name__ == "__main__":

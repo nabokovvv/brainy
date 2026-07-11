@@ -277,9 +277,13 @@ Full-context retention smoke прошёл на фактических
   когда Stage 2 добавит реальные citation IDs.
 - Убрать spaCy, Wikidata, chart generator и тяжёлый reranker из fast path; Whisper сохраняется как поддерживаемый voice path.
 - Зафиксировать точный установленный tag Gemma на Mac и использовать его как первый local benchmark candidate.
-- [x] Добавить latency badge и feedback button (👍/👎, sampled every 8-12 replies,
-  no dialogue-text storage — см. `docs/FEEDBACK_DESIGN.md`, `brainy_core/feedback.py`).
-  Source badge остаётся open для Web ON.
+  - [x] Добавить latency badge и feedback button (👍/👎, sampled every 8-12 replies,
+   no dialogue-text storage — см. `docs/FEEDBACK_DESIGN.md`, `brainy_core/feedback.py`).
+   Source badge остаётся open для Web ON.
+  - [x] Выбор персоны (tone-only system-prompt prefix, per-chat в chat_data/SQLite
+   рядом с Web OFF/ON; 4 персоны — Assistant/Kawaii/Bro/Sarcastic rival; locale-parity
+   на всех 8 локалях; toggle не меняет grounding/citation format). Реализовано в
+   `brainy_core/persona.py` + `bot.py` + `storage.py`, см. `docs/BACKLOG_IDEAS.md`.
 
 Checkpoint UX: Bot API 10.0+ `sendMessageDraft` подключён через PTB 22.8 как
 неблокирующий fail-soft animated Thinking preview; typing остаётся fallback. Это

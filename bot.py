@@ -40,6 +40,11 @@ from brainy_core import (
     SearchQuery,
     build_fast_chat_request,
 )
+from brainy_core.persona import (
+    ALL_PERSONAS,
+    DEFAULT_PERSONA,
+    is_valid_persona,
+)
 from brainy_core.feedback import FeedbackEntry, FeedbackStore
 from brainy_core.providers import OllamaProvider
 from brainy_core.providers.web_search import RotatingSearchProvider, build_rotating_provider
@@ -78,6 +83,8 @@ ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
 ACTION_TOGGLE_WEB = "ACTION_TOGGLE_WEB"
 ACTION_FEEDBACK = "ACTION_FEEDBACK"
 ACTION_EXPLORE_SOURCES = "ACTION_EXPLORE_SOURCES"
+ACTION_SHOW_PERSONAS = "ACTION_SHOW_PERSONAS"
+ACTION_SET_PERSONA = "ACTION_SET_PERSONA"
 
 _FEEDBACK_SAMPLE_MIN = 8
 _FEEDBACK_SAMPLE_MAX = 12
@@ -328,6 +335,7 @@ async def _ensure_settings_loaded(
         if settings is not None:
             context.chat_data["language"] = settings.language
             context.chat_data["web_enabled"] = settings.web_enabled
+            context.chat_data["persona"] = settings.persona
 
 
 async def _persist_settings(
@@ -336,6 +344,7 @@ async def _persist_settings(
     *,
     language: str | None = None,
     web_enabled: bool | None = None,
+    persona: str | None = None,
 ) -> None:
     repo = context.application.bot_data.get("settings_repo")
     if repo is None:
@@ -345,6 +354,7 @@ async def _persist_settings(
             chat_id,
             language=language,
             web_enabled=web_enabled,
+            persona=persona,
         )
     except Exception as exc:
         logger.error("Settings persistence failed type=%s", type(exc).__name__)
@@ -355,6 +365,43 @@ def get_route_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineK
     key = "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(translator.get_string(key, lang), callback_data=ACTION_TOGGLE_WEB)]]
+    )
+
+
+def _current_persona(context: ContextTypes.DEFAULT_TYPE) -> str:
+    persona = context.chat_data.get("persona", DEFAULT_PERSONA)
+    return persona if is_valid_persona(persona) else DEFAULT_PERSONA
+
+
+def get_persona_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
+    translator = context.application.bot_data["translator"]
+    rows = [
+        [
+            InlineKeyboardButton(
+                translator.get_string(f"persona_{name}", lang),
+                callback_data=f"{ACTION_SET_PERSONA}_{name}",
+            )
+            for name in ALL_PERSONAS[i : i + 2]
+        ]
+        for i in range(0, len(ALL_PERSONAS), 2)
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+async def _send_persona_selector(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, lang: str
+) -> None:
+    translator = context.application.bot_data["translator"]
+    lines = [translator.get_string("persona_prompt", lang)]
+    for name in ALL_PERSONAS:
+        lines.append(
+            f"• {translator.get_string(f'persona_{name}', lang)} — "
+            f"{translator.get_string(f'persona_{name}_desc', lang)}"
+        )
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="\n".join(lines),
+        reply_markup=get_persona_keyboard(context, lang),
     )
 
 
@@ -446,6 +493,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = translator.get_string("welcome_new_user", user_lang)
         keyboard = get_language_keyboard(context, user_lang)
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        await _send_persona_selector(context, chat_id, user_lang)
     else:
         status_key = (
             "web_status_on"
@@ -457,6 +505,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             text=translator.get_string(status_key, user_lang),
             reply_markup=get_route_keyboard(context, user_lang),
         )
+        await _send_persona_selector(context, chat_id, user_lang)
 
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -480,6 +529,7 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text=translator.get_string("language_selection_prompt", lang),
         reply_markup=get_all_languages_keyboard(context),
     )
+    await _send_persona_selector(context, chat_id, lang)
 
 
 # ---------------------------------------------------------------------------#
@@ -548,6 +598,29 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 language=exploration.language,
                 deep=True,
             )
+        return
+
+    if action == ACTION_SHOW_PERSONAS:
+        await query.edit_message_text(
+            text=translator.get_string("persona_prompt", lang),
+            reply_markup=get_persona_keyboard(context, lang),
+        )
+        return
+
+    if action.startswith(f"{ACTION_SET_PERSONA}_"):
+        new_persona = action.replace(f"{ACTION_SET_PERSONA}_", "")
+        if not is_valid_persona(new_persona):
+            await query.answer(text=translator.get_string("persona_invalid", lang))
+            return
+        context.chat_data["persona"] = new_persona
+        await _persist_settings(context, chat_id, persona=new_persona)
+        confirm_text = translator.get_string(
+            "persona_set", lang, persona_name=translator.get_string(f"persona_{new_persona}", lang)
+        )
+        await query.edit_message_text(
+            text=confirm_text,
+            reply_markup=get_persona_keyboard(context, lang),
+        )
         return
 
     await query.answer()
@@ -796,7 +869,7 @@ async def fast_reply_handler(
         if provider is None:
             raise RuntimeError("Inference provider is not configured")
         async with llm_semaphore:
-            request = build_fast_chat_request(query, lang)
+            request = build_fast_chat_request(query, lang, persona=_current_persona(context))
             stream_chat = getattr(provider, "stream_chat", None)
             if callable(stream_chat):
                 result = None
@@ -929,7 +1002,9 @@ async def grounded_web_reply_handler(
         _queue_latest_draft(
             draft_updates, translator.get_string("web_progress_synthesizing", language)
         )
-        request = synthesizer.build_request(query, language, bundle, detailed=deep)
+        request = synthesizer.build_request(
+            query, language, bundle, detailed=deep, persona=_current_persona(context)
+        )
         remaining = (
             max(0.1, deep_deadline - asyncio.get_running_loop().time())
             if deep_deadline is not None

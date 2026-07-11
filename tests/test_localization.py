@@ -50,6 +50,17 @@ EXPECTED_KEYS = {
     "web_status_on",
     "web_unavailable",
     "welcome_new_user",
+    "persona_prompt",
+    "persona_assistant",
+    "persona_assistant_desc",
+    "persona_kawaii",
+    "persona_kawaii_desc",
+    "persona_bro",
+    "persona_bro_desc",
+    "persona_sarcastic",
+    "persona_sarcastic_desc",
+    "persona_invalid",
+    "persona_set",
 }
 EXPECTED_CONTENT_LANGUAGES = {"de", "en", "es", "id", "pt", "ru", "tr"}
 EXPECTED_CONTENT_KEYS = {

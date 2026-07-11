@@ -24,11 +24,16 @@ self-hosted runner registration, dependency audit CI step). Не превращ�
 slice до этого момента — правило `PRODUCT_STRATEGY.md`/`AGENTS.md` не
 расширять публичный MVP пока quality gates текущего Stage не закрыты.
 
-## Idea: выбор персоны (personality) при старте бота
+## Idea: выбор персоны (personality) при старте бота — реализовано
 
 Мотивация: аддиктивность за счёт тона ответа, а не за счёт возможностей
 модели. Реализуется как system prompt prefix — без нового provider contract,
 без изменения inference pipeline.
+
+Полный slice (4 персоны, per-chat storage, toggle рядом с Web OFF/ON, locale
+parity на 8 локалях, тесты) — в `brainy_core/persona.py` + `bot.py` +
+`storage.py` (branch `codex/persona-selection`, см. `EXECUTION_PLAN.md` Stage 1).
+Оставлено здесь как ссылка на дизайн-замысел.
 
 Ограничение: локальные модели слабые (Gemma E2B и похожие), поэтому промпт
 персоны должен быть коротким (2–4 предложения), императивным и без сложных
