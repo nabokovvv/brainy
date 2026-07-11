@@ -144,11 +144,13 @@ class GroundedSynthesizer:
 
     async def synthesize(self, query: str, language: str, bundle: EvidenceBundle) -> GroundedAnswer:
         context = "\n".join(
-            f"[{item.evidence_id}] {item.text} ({item.canonical_url})" for item in bundle.items
+            f"[{item.evidence_id}] {item.text}" for item in bundle.items
         )
         prompt = (
             "Return JSON only with keys answer and citation_ids. Answer only from the evidence. "
             "Use citation_ids only when they support a claim; never invent IDs. "
+            "The answer text must be plain prose: never write an evidence ID or bracket marker "
+            "inside it — citations are attached separately by the app. "
             f"Answer in language {language}.\nQuestion: {query}\nEvidence:\n{context}"
         )
         result = await self._provider.chat(

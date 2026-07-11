@@ -9,7 +9,7 @@ import re
 import tempfile
 import uuid
 from dataclasses import dataclass
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import httpx
 import telegram.error
@@ -740,8 +740,11 @@ async def grounded_web_reply_handler(
             await update.message.reply_text(translator.get_string("web_unavailable", language))
             return
         grounded = await synthesizer.synthesize(query, language, bundle)
+        top_citations = grounded.citations[:3]
         sources = "\n".join(
-            f"[{item.evidence_id}]({item.canonical_url})" for item in grounded.citations
+            f"[{index}] [{urlparse(item.canonical_url).hostname or item.canonical_url}]"
+            f"({item.canonical_url})"
+            for index, item in enumerate(top_citations, start=1)
         )
         answer = grounded.answer if not sources else f"{grounded.answer}\n\n{sources}"
         renderer = context.application.bot_data.get("rich_message_renderer")
