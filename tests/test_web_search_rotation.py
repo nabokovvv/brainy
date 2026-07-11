@@ -186,7 +186,9 @@ class RotationTests(unittest.IsolatedAsyncioTestCase):
                 self.name = name
 
             async def search(self, request: SearchQuery) -> tuple[SearchResult, ...]:
-                return (SearchResult(self.name, f"https://{self.name}.example", "ok", 1, self.name),)
+                return (
+                    SearchResult(self.name, f"https://{self.name}.example", "ok", 1, self.name),
+                )
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quota.json"

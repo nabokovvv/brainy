@@ -35,7 +35,10 @@
     "feedback_recorded_down": "Thanks — noted. 👎",
     "feedback_expired": "This vote is no longer available.",
     "web_progress_searching": "🔎 Searching the web…",
-    "web_progress_synthesizing": "✍️ Writing the answer…"
+    "web_progress_synthesizing": "✍️ Writing the answer…",
+    "explore_sources_button": "🔎 Explore sources",
+    "explore_sources_started": "Exploring the sources…",
+    "explore_sources_expired": "This source exploration is no longer available."
   },
   "es": {
     "welcome_new_user": "👋 ¡Hola! Soy Brainy, tu asistente de IA. El idioma está configurado en español. ¿Quieres cambiarlo?",
@@ -73,7 +76,10 @@
     "feedback_recorded_down": "Gracias, anotado. 👎",
     "feedback_expired": "Este voto ya no está disponible.",
     "web_progress_searching": "🔎 Buscando en la web…",
-    "web_progress_synthesizing": "✍️ Redactando la respuesta…"
+    "web_progress_synthesizing": "✍️ Redactando la respuesta…",
+    "explore_sources_button": "🔎 Explorar fuentes",
+    "explore_sources_started": "Explorando las fuentes…",
+    "explore_sources_expired": "Esta exploración de fuentes ya no está disponible."
   },
   "ru": {
     "welcome_new_user": "👋 Привет! Я Brainy, ваш ИИ‑помощник. Сейчас выбран русский язык. Хотите сменить язык?",
@@ -111,7 +117,10 @@
     "feedback_recorded_down": "Спасибо, учту. 👎",
     "feedback_expired": "Этот голос уже недоступен.",
     "web_progress_searching": "🔎 Ищу в интернете…",
-    "web_progress_synthesizing": "✍️ Формулирую ответ…"
+    "web_progress_synthesizing": "✍️ Формулирую ответ…",
+    "explore_sources_button": "🔎 Изучить источники",
+    "explore_sources_started": "Изучаю источники…",
+    "explore_sources_expired": "Эта кнопка изучения источников уже недоступна."
   },
   "pt": {
     "welcome_new_user": "👋 Olá! Sou o Brainy, seu assistente de IA. O idioma está definido como português. Quer mudar?",
@@ -149,7 +158,10 @@
     "feedback_recorded_down": "Obrigado, anotado. 👎",
     "feedback_expired": "Este voto não está mais disponível.",
     "web_progress_searching": "🔎 Pesquisando na web…",
-    "web_progress_synthesizing": "✍️ Escrevendo a resposta…"
+    "web_progress_synthesizing": "✍️ Escrevendo a resposta…",
+    "explore_sources_button": "🔎 Explorar fontes",
+    "explore_sources_started": "Explorando as fontes…",
+    "explore_sources_expired": "Esta exploração de fontes já não está disponível."
   },
   "fr": {
     "welcome_new_user": "👋 Salut ! Je suis Brainy, votre assistant IA. La langue est réglée sur le français. Voulez‑vous la changer ?",
@@ -187,7 +199,10 @@
     "feedback_recorded_down": "Merci, c’est noté. 👎",
     "feedback_expired": "Ce vote n’est plus disponible.",
     "web_progress_searching": "🔎 Recherche sur le web…",
-    "web_progress_synthesizing": "✍️ Rédaction de la réponse…"
+    "web_progress_synthesizing": "✍️ Rédaction de la réponse…",
+    "explore_sources_button": "🔎 Explorer les sources",
+    "explore_sources_started": "Exploration des sources…",
+    "explore_sources_expired": "Cette exploration des sources n’est plus disponible."
   },
   "de": {
     "welcome_new_user": "👋 Hallo! Ich bin Brainy, dein KI‑Assistent. Die Sprache ist auf Deutsch eingestellt. Möchtest du sie ändern?",
@@ -225,7 +240,10 @@
     "feedback_recorded_down": "Danke, notiert. 👎",
     "feedback_expired": "Diese Abstimmung ist nicht mehr verfügbar.",
     "web_progress_searching": "🔎 Suche im Web…",
-    "web_progress_synthesizing": "✍️ Formuliere die Antwort…"
+    "web_progress_synthesizing": "✍️ Formuliere die Antwort…",
+    "explore_sources_button": "🔎 Quellen untersuchen",
+    "explore_sources_started": "Quellen werden untersucht…",
+    "explore_sources_expired": "Diese Quellenanalyse ist nicht mehr verfügbar."
   },
   "tr": {
     "welcome_new_user": "👋 Merhaba! Ben Brainy, yapay zekâ asistanın. Dil Türkçe olarak ayarlı. Değiştirmek ister misiniz?",
@@ -263,7 +281,10 @@
     "feedback_recorded_down": "Anlaşıldı, not aldım. 👎",
     "feedback_expired": "Bu oy artık kullanılamıyor.",
     "web_progress_searching": "🔎 Web'de aranıyor…",
-    "web_progress_synthesizing": "✍️ Yanıt yazılıyor…"
+    "web_progress_synthesizing": "✍️ Yanıt yazılıyor…",
+    "explore_sources_button": "🔎 Kaynakları incele",
+    "explore_sources_started": "Kaynaklar inceleniyor…",
+    "explore_sources_expired": "Bu kaynak incelemesi artık kullanılamıyor."
   },
   "id": {
     "welcome_new_user": "👋 Halo! Saya Brainy, asisten AI Anda. Bahasa disetel ke bahasa Indonesia. Ingin menggantinya?",
@@ -301,6 +322,9 @@
     "feedback_recorded_down": "Terima kasih, sudah dicatat. 👎",
     "feedback_expired": "Suara ini sudah tidak berlaku.",
     "web_progress_searching": "🔎 Mencari di web…",
-    "web_progress_synthesizing": "✍️ Menyusun jawaban…"
+    "web_progress_synthesizing": "✍️ Menyusun jawaban…",
+    "explore_sources_button": "🔎 Telusuri sumber",
+    "explore_sources_started": "Menelusuri sumber…",
+    "explore_sources_expired": "Penelusuran sumber ini sudah tidak tersedia."
   }
 }

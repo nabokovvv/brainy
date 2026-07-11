@@ -88,6 +88,17 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(item.evidence_id, context)
             self.assertNotIn(item.canonical_url, context)
 
+    async def test_detailed_synthesis_has_a_larger_bounded_output(self):
+        bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "en"))
+        synthesizer = GroundedSynthesizer(FakeInference())
+
+        regular = synthesizer.build_request("question", "en", bundle)
+        detailed = synthesizer.build_request("question", "en", bundle, detailed=True)
+
+        self.assertEqual(regular.max_output_tokens, 500)
+        self.assertEqual(detailed.max_output_tokens, 900)
+        self.assertIn("Compare sources", detailed.messages[0].content)
+
     async def test_synthesis_strips_think_trace_and_rejects_empty(self):
         bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
         answer = await GroundedSynthesizer(

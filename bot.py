@@ -43,6 +43,7 @@ from brainy_core.feedback import FeedbackEntry, FeedbackStore
 from brainy_core.providers import OllamaProvider
 from brainy_core.providers.web_search import RotatingSearchProvider, build_rotating_provider
 from brainy_core.scheduling import StablePriorityQueue
+from brainy_core.source_exploration import SourceExploration, SourceExplorationStore
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
 from page_processor import PageFetcher
@@ -74,6 +75,7 @@ ACTION_SHOW_LANGUAGES = "ACTION_SHOW_LANGUAGES"
 ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
 ACTION_TOGGLE_WEB = "ACTION_TOGGLE_WEB"
 ACTION_FEEDBACK = "ACTION_FEEDBACK"
+ACTION_EXPLORE_SOURCES = "ACTION_EXPLORE_SOURCES"
 
 _FEEDBACK_SAMPLE_MIN = 8
 _FEEDBACK_SAMPLE_MAX = 12
@@ -86,6 +88,7 @@ user_job_trackers: dict[int, "Job"] = {}
 user_last_update: dict[int, Update] = {}
 user_request_snapshots: dict[int, tuple[str, RouteIntent]] = {}
 feedback_store = FeedbackStore()
+source_exploration_store = SourceExplorationStore()
 
 
 @dataclass(frozen=True)
@@ -324,6 +327,22 @@ def get_feedback_keyboard(
     )
 
 
+def get_web_answer_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, lang: str, exploration_token: str
+) -> InlineKeyboardMarkup:
+    translator = context.application.bot_data["translator"]
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translator.get_string("explore_sources_button", lang),
+                    callback_data=f"{ACTION_EXPLORE_SOURCES}_{exploration_token}",
+                )
+            ]
+        ]
+    )
+
+
 def _capture_request_snapshot(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -431,6 +450,29 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if action.startswith(f"{ACTION_FEEDBACK}_"):
         await _handle_feedback_callback(query, context, translator, lang, action)
+        return
+
+    if action.startswith(f"{ACTION_EXPLORE_SOURCES}_"):
+        token = action[len(f"{ACTION_EXPLORE_SOURCES}_") :]
+        exploration = source_exploration_store.pop(token, chat_id=update.effective_chat.id)
+        if exploration is None:
+            await query.answer(text=translator.get_string("explore_sources_expired", lang))
+            return
+        await query.answer(text=translator.get_string("explore_sources_started", lang))
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+        chat_locks = context.application.bot_data.setdefault("chat_locks", {})
+        chat_lock = chat_locks.setdefault(update.effective_chat.id, asyncio.Lock())
+        async with chat_lock:
+            await grounded_web_reply_handler(
+                update,
+                context,
+                exploration.query,
+                language=exploration.language,
+                deep=True,
+            )
         return
 
     await query.answer()
@@ -753,16 +795,22 @@ def _display_host(url: str) -> str:
 
 
 async def grounded_web_reply_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, query: str, *, language: str
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    query: str,
+    *,
+    language: str,
+    deep: bool = False,
 ) -> None:
     """Run the provider-neutral Web ON orchestration and render its citations."""
+    reply_target = getattr(update, "effective_message", None) or update.message
     translator = context.application.bot_data["translator"]
-    gateway = context.application.bot_data.get("search_gateway")
+    gateway = context.application.bot_data.get("deep_search_gateway" if deep else "search_gateway")
     synthesizer = context.application.bot_data.get("grounded_synthesizer")
     provider = context.application.bot_data.get("inference_provider")
     llm_semaphore = context.application.bot_data["llm_semaphore"]
     if gateway is None or synthesizer is None or provider is None:
-        await update.message.reply_text(translator.get_string("web_unavailable", language))
+        await reply_target.reply_text(translator.get_string("web_unavailable", language))
         return
 
     chat_id = update.effective_chat.id
@@ -773,13 +821,19 @@ async def grounded_web_reply_handler(
     )
     try:
         started_at = time.perf_counter()
+        deep_deadline = asyncio.get_running_loop().time() + 30 if deep else None
         # Phase 1: show a "searching" draft while the gateway runs.
         _queue_latest_draft(
             draft_updates, translator.get_string("web_progress_searching", language)
         )
-        bundle = await gateway.build_bundle(SearchQuery(query=query, language=language))
+        bundle = await asyncio.wait_for(
+            gateway.build_bundle(
+                SearchQuery(query=query, language=language, limit=10 if deep else 5)
+            ),
+            timeout=30 if deep else 20,
+        )
         if not bundle.items:
-            await update.message.reply_text(translator.get_string("web_unavailable", language))
+            await reply_target.reply_text(translator.get_string("web_unavailable", language))
             return
 
         # Phase 2: synthesis is a plain text-in/text-out chat over the clean web
@@ -788,32 +842,38 @@ async def grounded_web_reply_handler(
         _queue_latest_draft(
             draft_updates, translator.get_string("web_progress_synthesizing", language)
         )
-        request = synthesizer.build_request(query, language, bundle)
-        async with llm_semaphore:
-            stream_chat = getattr(provider, "stream_chat", None)
-            if callable(stream_chat):
-                result = None
-                streamed_text = ""
-                async for event in stream_chat(request):
-                    if event.delta:
-                        streamed_text += event.delta
-                        visible_preview = strip_think(streamed_text)
-                        if visible_preview:
-                            _queue_latest_draft(draft_updates, visible_preview)
-                    elif event.result is not None:
-                        result = event.result
-                if result is None:
-                    raise RuntimeError("Synthesis stream ended without a final result")
-            else:
-                result = await provider.chat(request)
+        request = synthesizer.build_request(query, language, bundle, detailed=deep)
+        remaining = (
+            max(0.1, deep_deadline - asyncio.get_running_loop().time())
+            if deep_deadline is not None
+            else None
+        )
+        async with asyncio.timeout(remaining):
+            async with llm_semaphore:
+                stream_chat = getattr(provider, "stream_chat", None)
+                if callable(stream_chat):
+                    result = None
+                    streamed_text = ""
+                    async for event in stream_chat(request):
+                        if event.delta:
+                            streamed_text += event.delta
+                            visible_preview = strip_think(streamed_text)
+                            if visible_preview:
+                                _queue_latest_draft(draft_updates, visible_preview)
+                        elif event.result is not None:
+                            result = event.result
+                    if result is None:
+                        raise RuntimeError("Synthesis stream ended without a final result")
+                else:
+                    result = await provider.chat(request)
         answer_text = re.sub(r"<think>.*?</think>", "", result.text, flags=re.S | re.I).strip()
         if not answer_text:
-            await update.message.reply_text(translator.get_string("web_unavailable", language))
+            await reply_target.reply_text(translator.get_string("web_unavailable", language))
             return
 
         elapsed_s = time.perf_counter() - started_at
-        badge = f"🌐 {max(elapsed_s, 0):.1f}s"
-        top_citations = synthesizer.select_citations(bundle, 3)
+        badge = f"{'🔎' if deep else '🌐'} {max(elapsed_s, 0):.1f}s"
+        top_citations = synthesizer.select_citations(bundle, 5 if deep else 3)
 
         # The chunk text is still untrusted web content, so sanitize the model
         # output (strip any links it echoed) before attaching the app-trusted
@@ -837,18 +897,27 @@ async def grounded_web_reply_handler(
             if top_citations
             else LinkPreviewOptions(is_disabled=True)
         )
+        reply_markup = None
+        if not deep:
+            exploration_token = uuid.uuid4().hex[:12]
+            source_exploration_store.put(
+                exploration_token,
+                SourceExploration(chat_id=chat_id, query=query, language=language),
+            )
+            reply_markup = get_web_answer_keyboard(context, language, exploration_token)
         await send_long_message(
             update,
             message,
             parse_mode=ParseMode.MARKDOWN_V2,
             link_preview_options=link_preview,
+            reply_markup=reply_markup,
         )
     except (ProviderError, ValueError) as exc:
         logger.warning("Grounded web reply failed type=%s", type(exc).__name__)
-        await update.message.reply_text(translator.get_string("web_unavailable", language))
+        await reply_target.reply_text(translator.get_string("web_unavailable", language))
     except Exception as exc:
         logger.error("Grounded web reply failed type=%s", type(exc).__name__)
-        await update.message.reply_text(translator.get_string("web_unavailable", language))
+        await reply_target.reply_text(translator.get_string("web_unavailable", language))
     finally:
         if not draft_task.done():
             draft_task.cancel()
@@ -1036,7 +1105,8 @@ async def _extract_code_to_files(update, text: str) -> str:
         ext = _guess_ext(lang)
         bio = io.BytesIO(code.encode("utf-8"))
         bio.name = f"snippet_{idx}.{ext}"
-        await update.message.reply_document(InputFile(bio))
+        reply_target = getattr(update, "effective_message", None) or update.message
+        await reply_target.reply_document(InputFile(bio))
         out.append("👆📄📎\n")  # безопасный плейсхолдер
         pos = m.end()
         idx += 1
@@ -1053,6 +1123,7 @@ async def send_long_message(update, text: str, **kwargs):
     • если всё ещё падает на '-', экранирует дефисы вне кода, сохраняя маркеры '- '.
     """
 
+    reply_target = getattr(update, "effective_message", None) or update.message
     MAX = 4096
     if text is None:
         text = ""
@@ -1196,15 +1267,15 @@ async def send_long_message(update, text: str, **kwargs):
     # ---------- sending ----------
     if len(text) <= MAX:
         try:
-            await update.message.reply_text(text, **kwargs)
+            await reply_target.reply_text(text, **kwargs)
         except BadRequest:
             safe = _escape_hash_and_dot_outside_code(text)
             try:
-                await update.message.reply_text(safe, **kwargs)
+                await reply_target.reply_text(safe, **kwargs)
             except BadRequest:
                 safer = _escape_hyphens_outside_code(safe)
                 try:
-                    await update.message.reply_text(safer, **kwargs)
+                    await reply_target.reply_text(safer, **kwargs)
                 except BadRequest as e:  # This is the innermost BadRequest
                     logger.warning(
                         f"Failed to send message with MarkdownV2 after all escapes. Sending as plain text. Error: {e}",
@@ -1213,7 +1284,7 @@ async def send_long_message(update, text: str, **kwargs):
                     cleaned_final_text = _clean_text_for_plain_send(text)
                     # Send original text, remove parse_mode from kwargs
                     plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
-                    await update.message.reply_text(
+                    await reply_target.reply_text(
                         cleaned_final_text, parse_mode=None, **plain_kwargs
                     )
         return
@@ -1241,25 +1312,25 @@ async def send_long_message(update, text: str, **kwargs):
 
         try:
             if rest:
-                await update.message.reply_text(chunk, **common_kwargs)
+                await reply_target.reply_text(chunk, **common_kwargs)
             else:
-                await update.message.reply_text(chunk, **last_kwargs)
+                await reply_target.reply_text(chunk, **last_kwargs)
         except BadRequest:
             # 1-й повтор: экранируем # и . вне кода
             safe_chunk = _escape_hash_and_dot_outside_code(chunk)
             try:
                 if rest:
-                    await update.message.reply_text(safe_chunk, **common_kwargs)
+                    await reply_target.reply_text(safe_chunk, **common_kwargs)
                 else:
-                    await update.message.reply_text(safe_chunk, **last_kwargs)
+                    await reply_target.reply_text(safe_chunk, **last_kwargs)
             except BadRequest:
                 # 2-й повтор: экранируем '-' вне кода, сохраняя '- ' маркеры
                 safer_chunk = _escape_hyphens_outside_code(safe_chunk)
                 try:
                     if rest:
-                        await update.message.reply_text(safer_chunk, **common_kwargs)
+                        await reply_target.reply_text(safer_chunk, **common_kwargs)
                     else:
-                        await update.message.reply_text(safer_chunk, **last_kwargs)
+                        await reply_target.reply_text(safer_chunk, **last_kwargs)
                 except BadRequest as e:  # This is the innermost BadRequest
                     logger.warning(
                         f"Failed to send chunk with MarkdownV2 after all escapes. Sending as plain text. Error: {e}",
@@ -1268,12 +1339,12 @@ async def send_long_message(update, text: str, **kwargs):
                     cleaned_final_chunk = _clean_text_for_plain_send(chunk)
                     if rest:
                         plain_kwargs = {k: v for k, v in common_kwargs.items() if k != "parse_mode"}
-                        await update.message.reply_text(
+                        await reply_target.reply_text(
                             cleaned_final_chunk, parse_mode=None, **plain_kwargs
                         )
                     else:
                         plain_kwargs = {k: v for k, v in last_kwargs.items() if k != "parse_mode"}
-                        await update.message.reply_text(
+                        await reply_target.reply_text(
                             cleaned_final_chunk, parse_mode=None, **plain_kwargs
                         )
 
@@ -1408,6 +1479,15 @@ async def main_async() -> None:
     application.bot_data["search_provider"] = search_provider
     application.bot_data["search_gateway"] = (
         SearchGateway(search_provider, page_loader=page_fetcher.load if page_fetcher else None)
+        if search_provider is not None
+        else None
+    )
+    application.bot_data["deep_search_gateway"] = (
+        SearchGateway(
+            search_provider,
+            token_budget=2800,
+            page_loader=page_fetcher.load if page_fetcher else None,
+        )
         if search_provider is not None
         else None
     )

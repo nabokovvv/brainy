@@ -147,14 +147,28 @@ class GroundedSynthesizer:
     def __init__(self, provider: InferenceProvider) -> None:
         self._provider = provider
 
-    def build_request(self, query: str, language: str, bundle: EvidenceBundle) -> ChatRequest:
+    def build_request(
+        self,
+        query: str,
+        language: str,
+        bundle: EvidenceBundle,
+        *,
+        detailed: bool = False,
+    ) -> ChatRequest:
         context = "\n\n".join(item.text for item in bundle.items)
+        answer_style = (
+            "Give a thorough, well-structured answer. Compare sources when they disagree and "
+            "state important limitations. "
+            if detailed
+            else "Keep the answer concise unless detail is necessary. "
+        )
         system_prompt = (
             "You are Brainy, a helpful multilingual Telegram assistant with web access. "
             "Answer the question using only the web context below. If the context does not "
             "contain the answer, say so briefly instead of guessing. Reply in the language "
             f"identified by code '{language}'. Write plain prose only — no citation markers, "
-            "no bracketed IDs, and no URLs; sources are shown separately by the app."
+            "no bracketed IDs, and no URLs; sources are shown separately by the app. "
+            + answer_style
         )
         user_prompt = f"Question: {query}\n\nWeb context:\n{context}"
         return ChatRequest(
@@ -162,7 +176,7 @@ class GroundedSynthesizer:
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=user_prompt),
             ),
-            max_output_tokens=500,
+            max_output_tokens=900 if detailed else 500,
             temperature=0.0,
         )
 
