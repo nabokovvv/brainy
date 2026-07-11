@@ -175,7 +175,19 @@ class GroundedSynthesizer:
             raise ValueError("synthesis returned invalid structured output")
         valid = tuple(dict.fromkeys(item_id for item_id in raw_ids if item_id in bundle.by_id))
         citations = tuple(bundle.by_id[item_id] for item_id in valid)
-        return GroundedAnswer(answer.strip(), valid, citations)
+        return GroundedAnswer(_strip_evidence_markers(answer), valid, citations)
+
+
+# Evidence IDs look like ``E12-ab34cd56ef90``. Weak models sometimes copy these
+# markers into the prose despite instructions, so strip them defensively.
+_EVIDENCE_MARKER = re.compile(r"\s*\[?E\d+-[0-9a-f]{6,}\]?")
+
+
+def _strip_evidence_markers(text: str) -> str:
+    cleaned = _EVIDENCE_MARKER.sub("", text)
+    cleaned = re.sub(r"\s+([.,;:!?)])", r"\1", cleaned)  # tidy space before punctuation
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip()
 
 
 def _estimate_tokens(text: str) -> int:

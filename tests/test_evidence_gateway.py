@@ -90,6 +90,26 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
         ).synthesize("question", "ru", bundle)
         self.assertEqual(answer.citation_ids, (bundle.items[0].evidence_id,))
 
+    async def test_synthesis_strips_evidence_markers_from_answer(self):
+        bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
+        eid = bundle.items[0].evidence_id
+
+        class EchoMarkerInference:
+            model = ProviderModel("fake", "test", True)
+
+            async def chat(self, request):
+                payload = f'{{"answer":"Факт один [{eid}]. Факт два [{eid}].","citation_ids":["{eid}"]}}'
+                return ChatResult(payload, self.model, 1)
+
+        answer = await GroundedSynthesizer(EchoMarkerInference()).synthesize(
+            "question", "ru", bundle
+        )
+        self.assertNotIn(eid, answer.answer)
+        self.assertNotIn("[E", answer.answer)
+        self.assertEqual(answer.answer, "Факт один. Факт два.")
+        # Citations are still attached from citation_ids.
+        self.assertEqual(answer.citation_ids, (eid,))
+
     async def test_gateway_packs_page_chunks_with_provenance_and_trust(self):
         async def load_pages(urls):
             self.assertEqual(urls, ("https://example.com/a", "https://example.org/b"))
