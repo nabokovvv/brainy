@@ -794,6 +794,30 @@ async def _send_progress_draft(
         return None
 
 
+async def _finalize_draft(
+    bot,
+    chat_id: int,
+    draft_id: int,
+    draft_task: asyncio.Task,
+    final_text: str,
+) -> None:
+    """Stop the periodic draft loop and publish its true final revision.
+
+    Cancelling the loop alone can race its throttling (one update per
+    _DRAFT_UPDATE_INTERVAL_SECONDS): the last *complete* preview may still be
+    queued, unsent, when we cancel. Telegram is then left showing a stale,
+    mid-stream draft — visually a second, unformatted, truncated copy of the
+    answer — until its ~30s ephemeral timeout expires. Sending the complete
+    text here directly, bypassing the queue, keeps that leftover bubble in
+    sync with the persisted message instead of showing an old fragment.
+    """
+
+    if not draft_task.done():
+        draft_task.cancel()
+    await asyncio.gather(draft_task, return_exceptions=True)
+    await _send_progress_draft(bot, chat_id, draft_id=draft_id, text=final_text[:_DRAFT_TEXT_LIMIT])
+
+
 def _queue_latest_draft(updates: asyncio.Queue[str], text: str) -> None:
     """Keep only the newest preview so Telegram cannot backpressure inference."""
 
@@ -982,6 +1006,8 @@ async def fast_reply_handler(
             await update.message.reply_text(translator.get_string("error_fast_reply_empty", lang))
             return
 
+        await _finalize_draft(context.bot, chat_id, draft_id, draft_task, final_answer)
+
         add_turn(
             chat_id,
             ChatMessage(role="user", content=query),
@@ -1126,6 +1152,8 @@ async def grounded_web_reply_handler(
         if not answer_text:
             await reply_target.reply_text(translator.get_string("web_unavailable", language))
             return
+
+        await _finalize_draft(context.bot, chat_id, draft_id, draft_task, answer_text)
 
         add_turn(
             chat_id,
