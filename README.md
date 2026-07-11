@@ -105,9 +105,8 @@ request deadline and the dynamic context ceiling described in the benchmark abov
 lower `OLLAMA_CONTEXT_TOKENS` if you need to trade context length for latency/memory
 on a smaller machine.
 
-For voice input, `WHISPER_BACKEND=python` (default) uses `openai-whisper`, which
-shells out to whatever `ffmpeg` is on your `PATH`. The target Mac mini instead uses
-the owner's verified whisper.cpp large-v3 model:
+For voice input, the default backend is the target Mac mini's verified
+`whisper.cpp` large-v3 model:
 
 ```dotenv
 WHISPER_BACKEND=cpp
@@ -118,8 +117,9 @@ WHISPER_CPP_MODEL=~/Library/Application Support/Brainy/models/whisper/ggml-large
 
 `WHISPER_CPP_EXECUTABLE` and `WHISPER_CPP_FFMPEG` point at binaries that must be
 installed separately (e.g. via Homebrew) and are not managed by `uv sync`;
-`WHISPER_CPP_FFMPEG` is read from this exact path, not from `PATH`. The default
-`WHISPER_BACKEND=python` remains available for development machines.
+`WHISPER_CPP_FFMPEG` is read from this exact path, not from `PATH`. On a development
+machine without whisper.cpp, explicitly set `WHISPER_BACKEND=python`; it uses
+`openai-whisper` and `ffmpeg` from `PATH`.
 
 Never commit `.env`, tokens, API keys, or real user data.
 

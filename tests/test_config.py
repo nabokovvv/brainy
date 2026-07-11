@@ -19,6 +19,14 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.search_fallback_backend, "disabled")
         self.assertFalse(settings.web_enabled_default)
         self.assertTrue(settings.telegram_rich_messages)
+        self.assertEqual(settings.whisper_backend, "cpp")
+
+    def test_python_whisper_is_an_explicit_development_override(self) -> None:
+        settings = Settings.from_env({"WHISPER_BACKEND": "python"})
+
+        settings.validate()
+
+        self.assertEqual(settings.whisper_backend, "python")
 
     def test_telegram_token_is_checked_only_for_bot_runtime(self) -> None:
         settings = Settings.from_env({})

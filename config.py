@@ -96,7 +96,10 @@ class Settings:
                 name="OLLAMA_CONTEXT_TOKENS",
             ),
             whisper_model=source.get("WHISPER_MODEL", "base").strip(),
-            whisper_backend=source.get("WHISPER_BACKEND", "python").strip().lower(),
+            # The deployed Mac mini has a locally managed whisper.cpp large-v3 model.
+            # Keep the Python implementation as an explicit development override so a
+            # bot started without a dotenv loader does not silently select it.
+            whisper_backend=source.get("WHISPER_BACKEND", "cpp").strip().lower(),
             whisper_cpp_executable=source.get(
                 "WHISPER_CPP_EXECUTABLE", "/opt/homebrew/bin/whisper-cli"
             ).strip(),
