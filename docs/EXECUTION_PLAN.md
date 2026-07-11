@@ -319,8 +319,9 @@ Recommended commits:
   client (или lazy owned client), locale hint, bounded 512 KiB response, safe URL
   admission, один retry только для transient transport/HTTP ошибок, TTL cache,
   pacing и circuit breaker. Contract tests используют только `httpx.MockTransport`.
-- Lifespan wiring этого shared client и Web ON answer orchestration остаются следующим
-  вертикальным slice: adapter пока намеренно не вызывается Telegram handler-ом.
+- [x] Lifespan wiring shared `httpx` client и DuckDuckGo provider добавлен в runtime;
+  adapter пока намеренно не вызывается Telegram handler-ом.
+- Web ON answer orchestration остаётся следующим вертикальным slice.
 - URL canonicalization/dedup до загрузки страниц.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
 - Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.
@@ -351,7 +352,7 @@ Recommended commits:
   придуманный моделью, и неизвестный citation ID отбрасываются.
 - Web content явно отделяется как недоверенные данные; команды внутри страниц не
   исполняются как prompt instructions.
-- «Подробнее»: до 2 параллельных подзапросов, 4 страниц, общий deadline 30 секунд.
+- «Изучить источники»: до 2 параллельных подзапросов, 4 страниц, общий deadline 30 секунд.
 - При падении поиска bot явно сообщает, что свежесть не проверена; не выдаёт local answer как актуальный.
 
 ### Preserved quality library
@@ -359,7 +360,7 @@ Recommended commits:
 - Characterization fixtures сохраняют смыслы legacy `get_sub_queries`,
   `get_research_steps`, `generate_summary_from_chunks`, grouped synthesis и
   `polish_research_answer`, но prompts отделены от transport/provider code.
-- Query expansion для «Подробнее» сохраняет короткие/длинные формулировки на языке
+- Query expansion для «Изучить источники» сохраняет короткие/длинные формулировки на языке
   пользователя и один English-вариант, но ограничивается двумя подзапросами в MVP.
 - Multilingual sentence chunking проверяется на всех 8 локалях; safe redirects
   следуются вручную не более 2–3 hops с повторной DNS/IP validation каждого target.

@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import unquote
 
+import httpx
 import telegram.error
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram import InputFile
@@ -30,7 +31,7 @@ from telegram.ext import (
 import config
 from brainy_core import ProviderError, RouteIntent, build_fast_chat_request
 from brainy_core.feedback import FeedbackEntry, FeedbackStore
-from brainy_core.providers import OllamaProvider
+from brainy_core.providers import DuckDuckGoProvider, OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
@@ -1221,6 +1222,19 @@ async def main_async() -> None:
         context_window=config.OLLAMA_CONTEXT_TOKENS,
     )
 
+    # Search resources are created once per process and shared by the future
+    # Web ON gateway.  The provider remains dormant until orchestration is
+    # wired into the worker, so enabling SEARCH_BACKEND cannot unexpectedly
+    # start network traffic during import or Telegram startup.
+    search_client: httpx.AsyncClient | None = None
+    search_provider: DuckDuckGoProvider | None = None
+    if config.SETTINGS.search_backend == "duckduckgo":
+        search_client = httpx.AsyncClient(
+            headers={"User-Agent": config.CUSTOM_USER_AGENT},
+            follow_redirects=False,
+        )
+        search_provider = DuckDuckGoProvider(client=search_client)
+
     application = (
         Application.builder()
         .token(config.TELEGRAM_TOKEN)
@@ -1237,6 +1251,7 @@ async def main_async() -> None:
     application.bot_data["llm_semaphore"] = llm_semaphore
     application.bot_data["whisper_transcriber"] = whisper_transcriber
     application.bot_data["inference_provider"] = inference_provider
+    application.bot_data["search_provider"] = search_provider
     application.bot_data["rich_message_renderer"] = RichMessageRenderer(
         enabled=config.TELEGRAM_RICH_MESSAGES
     )
@@ -1292,6 +1307,10 @@ async def main_async() -> None:
             await _best_effort_cleanup("application.stop", application.stop)
         if inference_provider is not None:
             await _best_effort_cleanup("provider.close", inference_provider.aclose)
+        if search_provider is not None:
+            await _best_effort_cleanup("search_provider.close", search_provider.aclose)
+        if search_client is not None:
+            await _best_effort_cleanup("search_client.close", search_client.aclose)
         if application_initialized:
             await _best_effort_cleanup("application.shutdown", application.shutdown)
         logger.info("Bot has been shut down.")

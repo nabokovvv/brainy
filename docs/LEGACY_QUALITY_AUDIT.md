@@ -67,12 +67,12 @@ LLM никогда не возвращает произвольные URL как
 
 - Требования «только по evidence», язык пользователя, уникальные факты и адаптивная
   подробность сохраняются в provider-neutral synthesis prompt и eval fixtures.
-- Ориентиры 10–200 слов для базового Web ON, 100–300 для «Подробнее» и 40–80 слов
+- Ориентиры 10–200 слов для базового Web ON, 100–300 для «Изучить источники» и 40–80 слов
   на абзац сохраняются как мягкие readability heuristics, а не жёсткое обрезание.
 - `{intro, tldr}` сохраняется для будущего research report, но не усложняет короткий
   ответ MVP отдельным LLM-вызовом.
 - Ollama-варианты генерировали до 10 queries/steps. Это зафиксировано как историческая
-  breadth reference, но сознательно адаптировано до <=2 subqueries в «Подробнее» и
+  breadth reference, но сознательно адаптировано до <=2 subqueries в «Изучить источники» и
   <=6 entity-aware steps в будущей beta: fan-out 10 ухудшает latency и нулевую
   экономику.
 - Утверждение, что entity details — безусловный «final source of truth», отклонено:
@@ -84,7 +84,7 @@ LLM никогда не возвращает произвольные URL как
 explicit Web ON snapshot
   -> original query
   -> SearchProvider -> normalized SERP results
-  -> optional bounded expansion for «Подробнее» (<= 2 subqueries)
+  -> optional bounded expansion for «Изучить источники» (<= 2 subqueries)
   -> safe page fetch (2–4 sources)
   -> multilingual chunking + canonical/near dedupe
   -> semantic rerank per query + source diversity
@@ -124,7 +124,7 @@ provider/result rank и trust type. Внешний текст всегда по�
 - prompt-injection fixture из страницы не меняет system rules;
 - неизвестные citation IDs отбрасываются;
 - Web failure явно сообщает, что свежесть не проверена;
-- base Web ON не делает LLM preflight/query expansion; «Подробнее» ограничено двумя
+- base Web ON не делает LLM preflight/query expansion; «Изучить источники» ограничено двумя
   подзапросами, четырьмя страницами и единым deadline.
 
 ## Отдельно сохранённые кандидаты
