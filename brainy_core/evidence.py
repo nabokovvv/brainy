@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Sequence
@@ -137,82 +136,54 @@ class SearchGateway:
 
 
 class GroundedSynthesizer:
-    """Ask an inference provider for a constrained answer and validate citations."""
+    """Answer a question from clean web context, letting the app attach citations.
+
+    The model receives only the evidence *text* — no IDs, no URLs — and replies
+    in plain prose, exactly like the local fast path. That lets the answer stream
+    token-by-token and removes any chance of the model echoing an evidence ID into
+    the text. Citations are the top-ranked retrieved sources, attached by the app.
+    """
 
     def __init__(self, provider: InferenceProvider) -> None:
         self._provider = provider
 
+    def build_request(self, query: str, language: str, bundle: EvidenceBundle) -> ChatRequest:
+        context = "\n\n".join(item.text for item in bundle.items)
+        system_prompt = (
+            "You are Brainy, a helpful multilingual Telegram assistant with web access. "
+            "Answer the question using only the web context below. If the context does not "
+            "contain the answer, say so briefly instead of guessing. Reply in the language "
+            f"identified by code '{language}'. Write plain prose only — no citation markers, "
+            "no bracketed IDs, and no URLs; sources are shown separately by the app."
+        )
+        user_prompt = f"Question: {query}\n\nWeb context:\n{context}"
+        return ChatRequest(
+            messages=(
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=user_prompt),
+            ),
+            max_output_tokens=500,
+            temperature=0.0,
+        )
+
+    @staticmethod
+    def select_citations(bundle: EvidenceBundle, limit: int = 3) -> tuple[Evidence, ...]:
+        ordered = sorted(bundle.items, key=lambda item: item.rank)
+        return tuple(ordered[:limit])
+
     async def synthesize(self, query: str, language: str, bundle: EvidenceBundle) -> GroundedAnswer:
-        context = "\n".join(
-            f"[{item.evidence_id}] {item.text}" for item in bundle.items
-        )
-        prompt = (
-            "Return JSON only with keys answer and citation_ids. Answer only from the evidence. "
-            "Use citation_ids only when they support a claim; never invent IDs. "
-            "The answer text must be plain prose: never write an evidence ID or bracket marker "
-            "inside it — citations are attached separately by the app. "
-            f"Answer in language {language}.\nQuestion: {query}\nEvidence:\n{context}"
-        )
-        result = await self._provider.chat(
-            ChatRequest(
-                messages=(
-                    ChatMessage(
-                        role="system", content="You are a grounded web-answering assistant."
-                    ),
-                    ChatMessage(role="user", content=prompt),
-                ),
-                max_output_tokens=500,
-                temperature=0.0,
-            )
-        )
-        payload = _parse_json_object(result.text)
-        try:
-            answer = payload["answer"]
-            raw_ids = payload.get("citation_ids", [])
-        except (KeyError, TypeError):
-            raise ValueError("synthesis returned invalid structured output") from None
-        if not isinstance(answer, str) or not answer.strip() or not isinstance(raw_ids, list):
-            raise ValueError("synthesis returned invalid structured output")
-        valid = tuple(dict.fromkeys(item_id for item_id in raw_ids if item_id in bundle.by_id))
-        citations = tuple(bundle.by_id[item_id] for item_id in valid)
-        return GroundedAnswer(_strip_evidence_markers(answer), valid, citations)
+        """Non-streaming convenience: providers without stream_chat use this."""
 
-
-# Evidence IDs look like ``E12-ab34cd56ef90``. Weak models sometimes copy these
-# markers into the prose despite instructions, so strip them defensively.
-_EVIDENCE_MARKER = re.compile(r"\s*\[?E\d+-[0-9a-f]{6,}\]?")
-
-
-def _strip_evidence_markers(text: str) -> str:
-    cleaned = _EVIDENCE_MARKER.sub("", text)
-    cleaned = re.sub(r"\s+([.,;:!?)])", r"\1", cleaned)  # tidy space before punctuation
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-    return cleaned.strip()
+        result = await self._provider.chat(self.build_request(query, language, bundle))
+        answer = re.sub(r"<think>.*?</think>", "", result.text, flags=re.S | re.I).strip()
+        if not answer:
+            raise ValueError("synthesis returned an empty answer")
+        citations = self.select_citations(bundle)
+        return GroundedAnswer(answer, tuple(c.evidence_id for c in citations), citations)
 
 
 def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
-
-
-def _parse_json_object(text: str) -> dict[str, object]:
-    """Accept only one JSON object, tolerating common markdown wrappers."""
-
-    candidate = text.strip()
-    if candidate.startswith("```") and candidate.endswith("```"):
-        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE)
-    try:
-        payload = json.loads(candidate)
-    except json.JSONDecodeError:
-        start, end = candidate.find("{"), candidate.rfind("}")
-        if start < 0 or end <= start:
-            raise ValueError("synthesis returned invalid structured output") from None
-        try:
-            payload = json.loads(candidate[start : end + 1])
-        except json.JSONDecodeError:
-            raise ValueError("synthesis returned invalid structured output") from None
-    if not isinstance(payload, dict):
-        raise ValueError("synthesis returned invalid structured output")
-    return payload
 
 
 def _terms(text: str) -> set[str]:

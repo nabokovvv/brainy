@@ -36,19 +36,13 @@ class AlsoFailingSearch:
 class FakeInference:
     model = ProviderModel("fake", "test", True)
 
-    def __init__(self, citation_id: str = "E1", wrapped: bool = False):
-        self.citation_id = citation_id
-        self.wrapped = wrapped
+    def __init__(self, answer: str = "Ответ на основе контекста."):
+        self.answer = answer
+        self.last_request = None
 
     async def chat(self, request):
-        payload = f'{{"answer":"Ответ","citation_ids":["{self.citation_id}","unknown","{self.citation_id}"]}}'
-        if self.wrapped:
-            payload = f"Some preface.```json\n{payload}\n```"
-        return ChatResult(
-            payload,
-            self.model,
-            1,
-        )
+        self.last_request = request
+        return ChatResult(self.answer, self.model, 1)
 
 
 class FakePageChunk:
@@ -75,40 +69,35 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertLessEqual(bundle.estimated_tokens, 100)
 
-    async def test_synthesis_filters_unknown_and_duplicate_citations(self):
+    async def test_synthesis_returns_prose_with_top_ranked_citations(self):
         bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
-        answer = await GroundedSynthesizer(FakeInference(bundle.items[0].evidence_id)).synthesize(
-            "question", "ru", bundle
-        )
-        self.assertEqual(answer.citation_ids, (bundle.items[0].evidence_id,))
+        synthesizer = GroundedSynthesizer(FakeInference("Краткий ответ."))
+        answer = await synthesizer.synthesize("question", "ru", bundle)
+        self.assertEqual(answer.answer, "Краткий ответ.")
+        # Citations are the top-ranked retrieved sources, chosen by the app.
+        expected = synthesizer.select_citations(bundle)
+        self.assertEqual(answer.citations, expected)
         self.assertEqual(answer.citations[0].canonical_url, "https://example.com/a")
 
-    async def test_synthesis_accepts_wrapped_json_without_accepting_unstructured_text(self):
+    async def test_synthesis_prompt_excludes_ids_and_urls(self):
+        bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
+        request = GroundedSynthesizer(FakeInference()).build_request("question", "ru", bundle)
+        context = request.messages[-1].content
+        for item in bundle.items:
+            self.assertIn(item.text, context)
+            self.assertNotIn(item.evidence_id, context)
+            self.assertNotIn(item.canonical_url, context)
+
+    async def test_synthesis_strips_think_trace_and_rejects_empty(self):
         bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
         answer = await GroundedSynthesizer(
-            FakeInference(bundle.items[0].evidence_id, wrapped=True)
+            FakeInference("<think>hidden</think>Видимый ответ.")
         ).synthesize("question", "ru", bundle)
-        self.assertEqual(answer.citation_ids, (bundle.items[0].evidence_id,))
-
-    async def test_synthesis_strips_evidence_markers_from_answer(self):
-        bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
-        eid = bundle.items[0].evidence_id
-
-        class EchoMarkerInference:
-            model = ProviderModel("fake", "test", True)
-
-            async def chat(self, request):
-                payload = f'{{"answer":"Факт один [{eid}]. Факт два [{eid}].","citation_ids":["{eid}"]}}'
-                return ChatResult(payload, self.model, 1)
-
-        answer = await GroundedSynthesizer(EchoMarkerInference()).synthesize(
-            "question", "ru", bundle
-        )
-        self.assertNotIn(eid, answer.answer)
-        self.assertNotIn("[E", answer.answer)
-        self.assertEqual(answer.answer, "Факт один. Факт два.")
-        # Citations are still attached from citation_ids.
-        self.assertEqual(answer.citation_ids, (eid,))
+        self.assertEqual(answer.answer, "Видимый ответ.")
+        with self.assertRaises(ValueError):
+            await GroundedSynthesizer(FakeInference("<think>only</think>")).synthesize(
+                "question", "ru", bundle
+            )
 
     async def test_gateway_packs_page_chunks_with_provenance_and_trust(self):
         async def load_pages(urls):

@@ -41,6 +41,8 @@ EXPECTED_KEYS = {
     "sources_label",
     "trying_fast_reply",
     "waiting_in_queue",
+    "web_progress_searching",
+    "web_progress_synthesizing",
     "web_status_off",
     "web_status_on",
     "web_unavailable",

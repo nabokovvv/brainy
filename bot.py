@@ -759,44 +759,68 @@ async def grounded_web_reply_handler(
     translator = context.application.bot_data["translator"]
     gateway = context.application.bot_data.get("search_gateway")
     synthesizer = context.application.bot_data.get("grounded_synthesizer")
-    if gateway is None or synthesizer is None:
+    provider = context.application.bot_data.get("inference_provider")
+    llm_semaphore = context.application.bot_data["llm_semaphore"]
+    if gateway is None or synthesizer is None or provider is None:
         await update.message.reply_text(translator.get_string("web_unavailable", language))
         return
 
+    chat_id = update.effective_chat.id
+    draft_id = next(_draft_ids)
+    draft_updates: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+    draft_task = asyncio.create_task(
+        _publish_draft_updates(context.bot, chat_id, draft_id, draft_updates)
+    )
     try:
         started_at = time.perf_counter()
-        # Web synthesis returns the answer in one shot, so there is nothing to
-        # token-stream. Show phased progress drafts (search → synthesis) so the
-        # chat feels alive alongside the typing indicator.
-        chat_id = update.effective_chat.id
-        draft_id = next(_draft_ids)
-        await _send_progress_draft(
-            context.bot,
-            chat_id,
-            draft_id=draft_id,
-            text=translator.get_string("web_progress_searching", language),
+        # Phase 1: show a "searching" draft while the gateway runs.
+        _queue_latest_draft(
+            draft_updates, translator.get_string("web_progress_searching", language)
         )
         bundle = await gateway.build_bundle(SearchQuery(query=query, language=language))
         if not bundle.items:
             await update.message.reply_text(translator.get_string("web_unavailable", language))
             return
-        await _send_progress_draft(
-            context.bot,
-            chat_id,
-            draft_id=draft_id,
-            text=translator.get_string("web_progress_synthesizing", language),
+
+        # Phase 2: synthesis is a plain text-in/text-out chat over the clean web
+        # context, so stream it token-by-token into the same draft, exactly like
+        # the local fast path. Hold the shared LLM semaphore (single local GPU).
+        _queue_latest_draft(
+            draft_updates, translator.get_string("web_progress_synthesizing", language)
         )
-        grounded = await synthesizer.synthesize(query, language, bundle)
+        request = synthesizer.build_request(query, language, bundle)
+        async with llm_semaphore:
+            stream_chat = getattr(provider, "stream_chat", None)
+            if callable(stream_chat):
+                result = None
+                streamed_text = ""
+                async for event in stream_chat(request):
+                    if event.delta:
+                        streamed_text += event.delta
+                        visible_preview = strip_think(streamed_text)
+                        if visible_preview:
+                            _queue_latest_draft(draft_updates, visible_preview)
+                    elif event.result is not None:
+                        result = event.result
+                if result is None:
+                    raise RuntimeError("Synthesis stream ended without a final result")
+            else:
+                result = await provider.chat(request)
+        answer_text = re.sub(r"<think>.*?</think>", "", result.text, flags=re.S | re.I).strip()
+        if not answer_text:
+            await update.message.reply_text(translator.get_string("web_unavailable", language))
+            return
+
         elapsed_s = time.perf_counter() - started_at
         badge = f"🌐 {max(elapsed_s, 0):.1f}s"
-        top_citations = grounded.citations[:3]
+        top_citations = synthesizer.select_citations(bundle, 3)
 
-        # Sanitize the model-authored answer (strip any model links), then attach
-        # the app-trusted citation URLs as real MarkdownV2 links. Web ON must use
-        # the regular send path — the rich renderer strips links and cannot show a
-        # link preview. Telegram renders at most one preview per message, so point
-        # it at the top source.
-        safe_answer = sanitize_untrusted_markdown(grounded.answer, neutralize_plain_urls=True)
+        # The chunk text is still untrusted web content, so sanitize the model
+        # output (strip any links it echoed) before attaching the app-trusted
+        # citation URLs as real MarkdownV2 links. Web ON uses the regular send
+        # path so it can show a link preview; Telegram renders at most one per
+        # message, so point it at the top source.
+        safe_answer = sanitize_untrusted_markdown(answer_text, neutralize_plain_urls=True)
         body = escape_markdown_v2(f"{safe_answer}\n\n{badge}")
         source_lines = [
             f"{index}\\. [{escape_markdown(_display_host(item.canonical_url), version=2)}]"
@@ -825,6 +849,10 @@ async def grounded_web_reply_handler(
     except Exception as exc:
         logger.error("Grounded web reply failed type=%s", type(exc).__name__)
         await update.message.reply_text(translator.get_string("web_unavailable", language))
+    finally:
+        if not draft_task.done():
+            draft_task.cancel()
+        await asyncio.gather(draft_task, return_exceptions=True)
 
 
 # ---------------------------------------------------------------------------#
