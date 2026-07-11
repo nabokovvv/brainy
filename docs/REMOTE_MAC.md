@@ -54,3 +54,7 @@ Key-based SSH через `lobster@Mac.local` подтверждён; для бу
 `~/Library/Application Support/Brainy/models/whisper/ggml-large-v3.bin`; executable —
 `/opt/homebrew/bin/whisper-cli`. Fingerprint модели сохранён в combined benchmark
 review, сама модель не копируется в репозиторий.
+
+Повторная проверка 2026-07-11 через non-login SSH shell подтвердила, что
+абсолютные пути работают независимо от PATH: ffmpeg и whisper-cli успешно
+обработали существующий локальный audio fixture с large-v3 примерно за 6 секунд.

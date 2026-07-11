@@ -57,13 +57,12 @@ Stage 0 закрыт 2026-07-11. До перехода к Stage 1 остаютс
   (короткий ответ) до ~10s (длинный ответ) через local Ollama. Для повторного
   доступа к настройкам добавлена команда `/settings`, которая снова показывает
   Web-переключатель и языковую клавиатуру; regression test покрывает оба сообщения.
-  - **[follow-up] Голосовое сообщение не транскрибировалось** во время
-    live smoke: `Voice transcription failed type=FileNotFoundError` в логе.
-    Вероятная причина — окружение SSH-сессии смоука (non-login shell, `PATH`
-    без `/opt/homebrew/bin`, где `ffmpeg`/`whisper-cli`), а не баг кода.
-    Повторный тест через launchd-сервис или interactive shell с полным `PATH`
-    остаётся Stage 1 follow-up; это не блокирует Stage 0, поскольку offline
-    voice contract tests green и voice path не изменялся.
+  - **[x] Voice smoke повторён 2026-07-11** через SSH с тем же non-login PATH:
+    абсолютные `/opt/homebrew/bin/ffmpeg` и `/opt/homebrew/bin/whisper-cli`
+    успешно обработали существующий локальный audio fixture с
+    установленной `ggml-large-v3.bin` (`ffmpeg_rc=0`, `whisper_rc=0`, ~6s).
+    Предыдущий `FileNotFoundError` был артефактом поиска executable через PATH;
+    runtime уже использует абсолютные пути.
 - завершить characterization и доработку optional research utilities перед их
   подключением к Web ON path (Stage 2 подготовка, не блокер самого Stage 0 →
   Stage 1 перехода, но остаётся open item плана).
