@@ -76,6 +76,10 @@ anti-bot challenge. Текущий adapter вернул пустую выдач�
 citations при этой выдаче не запускаются. Не записывать query, SERP или model
 response в документацию и логи.
 
+После замены provider на `ddgs==9.14.4` и явного `backend="duckduckgo"` повторный
+real smoke также завершился content-free `SearchUnavailableError` примерно за
+1.27 s. Это подтверждает upstream block на target, а не дефект legacy parser.
+
 ### Дальнейшие шаги
 
 1. Создать защищённый runtime `.env` на Mac (не добавлять в Git) с существующим
