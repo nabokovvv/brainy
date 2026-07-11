@@ -193,10 +193,13 @@ Gate:
   (`private: false`), поэтому hosted-минуты бесплатны без лимита, конфликта с
   zero-cost policy нет. `dependency-audit-report.json` закоммичен осознанно
   (не CI-only artifact), текущее содержимое `vulnerabilities: []`.
-- [ ] Подтвердить green run: раннер зарегистрирован и online, но
-  `GET /repos/nabokovvv/brainy/actions/runs` пока возвращает `total_count: 0` —
-  ни один push/PR ещё не триггерил CI после регистрации runner. Нужен реальный
-  push, чтобы увидеть первый прогон.
+- [x] Green run подтверждён (`run 29148890376`, commit `be74c82`): все шаги
+  (Sync dependencies, Compile check, Ruff check, Ruff format check, Pytest,
+  Dependency audit) прошли успешно на self-hosted `mac-mini`. Первый прогон
+  (`run 29148765757`) падал на `Sync dependencies` — у launchd-сервиса runner'а
+  был минимальный `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), в котором нет `uv`
+  (установлен в `~/.local/bin/uv`); исправлено добавлением `PATH=` в
+  `~/actions-runner/.env` и рестартом сервиса (`sudo ./svc.sh stop && start`).
 
 Exit Stage 0:
 
