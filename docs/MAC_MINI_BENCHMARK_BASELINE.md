@@ -75,3 +75,11 @@ Model file перенесён в постоянный
 ## Остаётся
 
 - UI tests для progressive Telegram delivery и message limits.
+
+## Web ON grounded synthetic smoke
+
+2026-07-11 выполнен loopback-only synthetic smoke на `gemma4:e2b` с 256 input
+tokens, context 8K и output cap 64. Ответ был непустым и прошёл marker check:
+TTFT 6.09 s, total 6.56 s, generation 42.32 tok/s, 20 completion tokens.
+Ollama RSS после загрузки составил 5.82 GB; использованный swap не изменился
+(1.59 GB до/после). Prompt и response текст не сохранялись.
