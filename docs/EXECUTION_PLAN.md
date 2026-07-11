@@ -182,14 +182,21 @@ Gate:
   (labels `self-hosted, macos, mac-mini`), запущен как сервис
   (`Runner.Listener run --startuptype service`), статус Idle в
   Settings → Actions → Runners.
-- [ ] В CI не передавать real provider keys и не запускать quota-consuming smoke tests.
-- [~] Dependency/security audit: codex добавил `scripts/audit_deps.py`
-  (запускает `pip-audit`/`safety`, fail-closed на high/critical, без платных
-  фич) и `audit` extra в `pyproject.toml`; текущий `dependency-audit-report.json`
-  пуст (`vulnerabilities: []`). Не закоммичено. Осталось: подключить как шаг в
-  `.github/workflows/ci.yml` и решить, коммитить ли report в репозиторий или
-  генерировать его только в CI как artifact.
-- [ ] Подтвердить green run после явного разрешения на push.
+- [x] В CI не передаются real provider keys и не запускаются quota-consuming
+  smoke tests — `ci.yml` использует только `uv sync`/compile/ruff/pytest/audit,
+  без внешних ключей.
+- [x] Dependency/security audit подключён: `scripts/audit_deps.py`
+  (`pip-audit`/`safety`, fail-closed на high/critical) вызывается как шаг
+  `Dependency audit` в `.github/workflows/ci.yml` на каждый push/PR (self-hosted,
+  zero cost), плюс отдельный `.github/workflows/dependency-audit.yml`
+  (`ubuntu-latest`, weekly cron + manual, SARIF upload) — репозиторий публичный
+  (`private: false`), поэтому hosted-минуты бесплатны без лимита, конфликта с
+  zero-cost policy нет. `dependency-audit-report.json` закоммичен осознанно
+  (не CI-only artifact), текущее содержимое `vulnerabilities: []`.
+- [ ] Подтвердить green run: раннер зарегистрирован и online, но
+  `GET /repos/nabokovvv/brainy/actions/runs` пока возвращает `total_count: 0` —
+  ни один push/PR ещё не триггерил CI после регистрации runner. Нужен реальный
+  push, чтобы увидеть первый прогон.
 
 Exit Stage 0:
 
