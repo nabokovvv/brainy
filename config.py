@@ -63,6 +63,7 @@ class Settings:
     whisper_cpp_ffmpeg: str
     web_enabled_default: bool
     search_backend: str
+    search_fallback_backend: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -98,6 +99,9 @@ class Settings:
             whisper_cpp_ffmpeg=source.get("WHISPER_CPP_FFMPEG", "/opt/homebrew/bin/ffmpeg").strip(),
             web_enabled_default=_env_bool(source.get("WEB_ENABLED_DEFAULT"), default=False),
             search_backend=source.get("SEARCH_BACKEND", "disabled").strip().lower(),
+            search_fallback_backend=source.get("SEARCH_FALLBACK_BACKEND", "disabled")
+            .strip()
+            .lower(),
         )
 
     def validate(self, *, require_telegram: bool = False, require_web: bool | None = None) -> None:
@@ -136,6 +140,13 @@ class Settings:
         web_required = self.web_enabled_default if require_web is None else require_web
         if self.search_backend not in {"disabled", "duckduckgo"}:
             errors.append("SEARCH_BACKEND must be 'disabled' or 'duckduckgo'")
+        if self.search_fallback_backend not in {"disabled", "duckduckgo"}:
+            errors.append("SEARCH_FALLBACK_BACKEND must be 'disabled' or 'duckduckgo'")
+        if (
+            self.search_fallback_backend == self.search_backend
+            and self.search_backend != "disabled"
+        ):
+            errors.append("SEARCH_FALLBACK_BACKEND must differ from SEARCH_BACKEND")
         if web_required and self.search_backend != "duckduckgo":
             errors.append("Web search requires SEARCH_BACKEND=duckduckgo")
 

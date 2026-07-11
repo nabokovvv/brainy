@@ -16,6 +16,7 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.llm_client, "ollama")
         self.assertEqual(settings.search_backend, "disabled")
+        self.assertEqual(settings.search_fallback_backend, "disabled")
         self.assertFalse(settings.web_enabled_default)
         self.assertTrue(settings.telegram_rich_messages)
 
@@ -107,6 +108,18 @@ class SettingsTests(unittest.TestCase):
         settings = Settings.from_env({"SEARCH_BACKEND": "surprise"})
 
         with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND"):
+            settings.validate()
+
+    def test_unknown_search_fallback_is_rejected(self) -> None:
+        settings = Settings.from_env({"SEARCH_FALLBACK_BACKEND": "paid-provider"})
+        with self.assertRaisesRegex(ConfigurationError, "SEARCH_FALLBACK_BACKEND"):
+            settings.validate()
+
+    def test_same_primary_and_fallback_are_rejected(self) -> None:
+        settings = Settings.from_env(
+            {"SEARCH_BACKEND": "duckduckgo", "SEARCH_FALLBACK_BACKEND": "duckduckgo"}
+        )
+        with self.assertRaisesRegex(ConfigurationError, "must differ"):
             settings.validate()
 
     def test_duckduckgo_backend_enables_the_first_web_search_adapter(self) -> None:
