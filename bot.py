@@ -56,6 +56,7 @@ from brainy_core.memory import (
 )
 from brainy_core.feedback import FeedbackEntry, FeedbackStore
 from brainy_core.providers import OllamaProvider
+from brainy_core.query_planner import plan_search_queries
 from brainy_core.providers.web_search import RotatingSearchProvider, build_rotating_provider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.source_exploration import SourceExploration, SourceExplorationStore
@@ -1100,10 +1101,17 @@ async def grounded_web_reply_handler(
         _queue_latest_draft(
             draft_updates, translator.get_string("web_progress_searching", language)
         )
+        # Condense the raw message into 1-2 bounded search queries. Short
+        # messages skip the LLM entirely; failures fall back to the raw text,
+        # so this can only reduce search-API usage, never block the answer.
+        async with llm_semaphore:
+            planned_queries = await plan_search_queries(query, language, provider)
+        search_requests = tuple(
+            SearchQuery(query=planned, language=language, limit=10 if deep else 5)
+            for planned in planned_queries
+        )
         bundle = await asyncio.wait_for(
-            gateway.build_bundle(
-                SearchQuery(query=query, language=language, limit=10 if deep else 5)
-            ),
+            gateway.build_bundle(search_requests[0], search_requests[1:]),
             timeout=30 if deep else 20,
         )
         if not bundle.items:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from urllib.parse import urlparse
 
 from brainy_core.inference import ChatMessage, ChatRequest, InferenceProvider
 from brainy_core.persona import DEFAULT_PERSONA, with_persona
-from brainy_core.search import SearchProvider, SearchQuery
+from brainy_core.search import SearchProvider, SearchQuery, SearchResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,13 +69,30 @@ class SearchGateway:
         self._page_loader = page_loader
         self._fallback_provider = fallback_provider
 
-    async def build_bundle(self, request: SearchQuery) -> EvidenceBundle:
+    async def _search_one(self, request: SearchQuery) -> Sequence[SearchResult]:
         try:
-            results = await self._provider.search(request)
+            return await self._provider.search(request)
         except Exception:
             if self._fallback_provider is None:
                 raise
-            results = await self._fallback_provider.search(request)
+            return await self._fallback_provider.search(request)
+
+    async def build_bundle(
+        self, request: SearchQuery, extra_queries: Sequence[SearchQuery] = ()
+    ) -> EvidenceBundle:
+        requests = (request, *extra_queries)
+        gathered = await asyncio.gather(
+            *(self._search_one(item) for item in requests), return_exceptions=True
+        )
+        results: list[SearchResult] = []
+        for outcome in gathered:
+            if isinstance(outcome, BaseException):
+                continue
+            results.extend(outcome)
+        if not results:
+            first = gathered[0]
+            if isinstance(first, BaseException):
+                raise first
         items: list[Evidence] = []
         seen_urls: set[str] = set()
         for result in sorted(results, key=lambda item: (item.rank, item.canonical_url)):
@@ -96,7 +114,7 @@ class SearchGateway:
             seen_urls.add(url)
         if self._page_loader is not None and seen_urls:
             chunks = await self._page_loader(tuple(sorted(seen_urls)))
-            query_terms = _terms(request.query)
+            query_terms = set().union(*(_terms(item.query) for item in requests))
             ranked = sorted(
                 enumerate(chunks),
                 key=lambda pair: (
