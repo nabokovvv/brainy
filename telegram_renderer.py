@@ -115,6 +115,7 @@ class RichMessageRenderer:
         chat_id: int,
         answer: str,
         badge: str,
+        reply_markup: Any = None,
     ) -> bool:
         """Return False when the regular persistent-message fallback should run."""
 
@@ -135,6 +136,8 @@ class RichMessageRenderer:
                 "skip_entity_detection": True,
             },
         }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         try:
             await asyncio.wait_for(
                 do_api_request("sendRichMessage", api_kwargs=payload),

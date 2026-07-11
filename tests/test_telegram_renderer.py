@@ -82,6 +82,26 @@ class TelegramRendererTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("allow_paid_broadcast", payload)
         self.assertNotIn("message_effect_id", payload)
 
+    async def test_rich_final_forwards_reply_markup_when_given(self) -> None:
+        bot = _RawBot()
+        renderer = RichMessageRenderer(enabled=True)
+        markup = {"inline_keyboard": [[{"text": "👍", "callback_data": "x"}]]}
+
+        sent = await renderer.send_final(
+            bot, chat_id=42, answer="# Fast", badge="⚡ 0.4s", reply_markup=markup
+        )
+
+        self.assertTrue(sent)
+        self.assertEqual(bot.calls[0][1]["reply_markup"], markup)
+
+    async def test_rich_final_omits_reply_markup_when_not_given(self) -> None:
+        bot = _RawBot()
+        renderer = RichMessageRenderer(enabled=True)
+
+        await renderer.send_final(bot, chat_id=42, answer="# Fast", badge="⚡ 0.4s")
+
+        self.assertNotIn("reply_markup", bot.calls[0][1])
+
     async def test_unsupported_rich_api_opens_circuit_and_falls_back_without_retry(self) -> None:
         bot = _RawBot([BadRequest("method not found")])
         renderer = RichMessageRenderer(enabled=True)

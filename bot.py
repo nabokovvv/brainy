@@ -4,8 +4,10 @@ import asyncio
 import io
 import itertools
 import logging
+import random
 import re
 import tempfile
+import uuid
 from dataclasses import dataclass
 from urllib.parse import unquote
 
@@ -27,6 +29,7 @@ from telegram.ext import (
 
 import config
 from brainy_core import ProviderError, RouteIntent, build_fast_chat_request
+from brainy_core.feedback import FeedbackEntry, FeedbackStore
 from brainy_core.providers import OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
@@ -58,6 +61,10 @@ _DRAFT_TEXT_LIMIT = 4096
 ACTION_SHOW_LANGUAGES = "ACTION_SHOW_LANGUAGES"
 ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
 ACTION_TOGGLE_WEB = "ACTION_TOGGLE_WEB"
+ACTION_FEEDBACK = "ACTION_FEEDBACK"
+
+_FEEDBACK_SAMPLE_MIN = 8
+_FEEDBACK_SAMPLE_MAX = 12
 
 # ---------------------------------------------------------------------------#
 #                         State and Request Queue                            #
@@ -66,6 +73,7 @@ user_message_buffers: dict[int, list[str]] = {}
 user_job_trackers: dict[int, "Job"] = {}
 user_last_update: dict[int, Update] = {}
 user_request_snapshots: dict[int, tuple[str, RouteIntent]] = {}
+feedback_store = FeedbackStore()
 
 
 @dataclass(frozen=True)
@@ -250,6 +258,39 @@ def get_route_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineK
     )
 
 
+def _should_show_feedback_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Sample keyboard display: always on a chat's first reply, then every ~8-12 replies."""
+
+    countdown = context.chat_data.get("feedback_prompt_countdown")
+    if countdown is None or countdown <= 0:
+        context.chat_data["feedback_prompt_countdown"] = random.randint(
+            _FEEDBACK_SAMPLE_MIN, _FEEDBACK_SAMPLE_MAX
+        )
+        return True
+    context.chat_data["feedback_prompt_countdown"] = countdown - 1
+    return False
+
+
+def get_feedback_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, lang: str, request_id: str
+) -> InlineKeyboardMarkup:
+    translator = context.application.bot_data["translator"]
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translator.get_string("feedback_thumbs_up_button", lang),
+                    callback_data=f"{ACTION_FEEDBACK}_up_{request_id}",
+                ),
+                InlineKeyboardButton(
+                    translator.get_string("feedback_thumbs_down_button", lang),
+                    callback_data=f"{ACTION_FEEDBACK}_down_{request_id}",
+                ),
+            ]
+        ]
+    )
+
+
 def _capture_request_snapshot(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -298,14 +339,46 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ---------------------------------------------------------------------------#
 #                       Button Callback Handler                              #
 # ---------------------------------------------------------------------------#
+async def _handle_feedback_callback(
+    query, context: ContextTypes.DEFAULT_TYPE, translator, lang: str, action: str
+) -> None:
+    vote, _, request_id = action[len(f"{ACTION_FEEDBACK}_") :].partition("_")
+    entry = feedback_store.pop(request_id)
+    if entry is None:
+        await query.answer(text=translator.get_string("feedback_expired", lang))
+        return
+
+    logger.info(
+        "feedback_recorded request_id=%s vote=%s provider=%s model=%s "
+        "latency_ms=%.1f lang=%s route=%s",
+        request_id,
+        vote,
+        entry.provider,
+        entry.model,
+        entry.latency_ms,
+        entry.lang,
+        entry.route,
+    )
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except BadRequest:
+        pass
+
+    confirm_key = "feedback_recorded_up" if vote == "up" else "feedback_recorded_down"
+    await query.answer(text=translator.get_string(confirm_key, lang))
+
+
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
-
     translator = context.application.bot_data["translator"]
     action = query.data
-
     lang = context.chat_data.get("language", "en")
+
+    if action.startswith(f"{ACTION_FEEDBACK}_"):
+        await _handle_feedback_callback(query, context, translator, lang, action)
+        return
+
+    await query.answer()
 
     if action == ACTION_SHOW_LANGUAGES:
         text = translator.get_string("language_selection_prompt", lang)
@@ -571,6 +644,22 @@ async def fast_reply_handler(
             return
 
         latency_badge = f"⚡ {max(result.latency_ms, 0) / 1000:.1f}s"
+
+        feedback_keyboard = None
+        if _should_show_feedback_keyboard(context):
+            request_id = uuid.uuid4().hex[:10]
+            feedback_store.put(
+                request_id,
+                FeedbackEntry(
+                    provider=result.model.provider,
+                    model=result.model.name,
+                    latency_ms=result.latency_ms,
+                    lang=lang,
+                    route=_current_route_intent(context).value,
+                ),
+            )
+            feedback_keyboard = get_feedback_keyboard(context, lang, request_id)
+
         rich_renderer = context.application.bot_data.get("rich_message_renderer")
         rich_sent = False
         if rich_renderer is not None:
@@ -579,11 +668,17 @@ async def fast_reply_handler(
                 chat_id=update.effective_chat.id,
                 answer=final_answer,
                 badge=latency_badge,
+                reply_markup=feedback_keyboard,
             )
         if not rich_sent:
             fallback_answer = sanitize_untrusted_markdown(final_answer, neutralize_plain_urls=True)
             telegram_text = escape_markdown_v2(f"{fallback_answer}\n\n{latency_badge}")
-            await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
+            await send_long_message(
+                update,
+                telegram_text,
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=feedback_keyboard,
+            )
     except ProviderError as exc:
         logger.warning("Fast reply provider failure code=%s", exc.code.value)
         await update.message.reply_text(translator.get_string("error_generic", lang))
