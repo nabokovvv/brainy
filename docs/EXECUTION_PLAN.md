@@ -48,14 +48,19 @@
 
 Stage 0 ещё не закрыт. До exit gate остаются:
 
-- real smoke Ollama/Whisper/Telegram: на текущем MacBook не установлены Ollama и
-  FFmpeg, а target model tag должен быть подтверждён на Mac mini;
+- [x] real smoke Ollama/Whisper подтверждён на Mac mini (`gemma4:e2b`,
+  8K/32K/64K, concurrency; whisper.cpp large-v3 combined-memory прогон) — см.
+  `MAC_MINI_BENCHMARK_BASELINE.md`.
+- [ ] real smoke Telegram: живой прогон `bot.py` против настоящего Telegram
+  API (не unit/UI-тесты форматирования) ещё не выполнялся ни на одном
+  окружении. Это единственный оставшийся блокер real-smoke части exit gate.
 - завершить characterization и доработку optional research utilities перед их
-  подключением к Web ON path;
-- выбрать доказанно бесплатный CI: self-hosted runner на Mac mini либо hosted Actions
-  только после подтверждения public/free minutes и spending limit `0`;
-- добавить бесплатный dependency audit: GitHub Dependency Review нельзя считать
-  доступным для private repo без подтверждённого GitHub Advanced Security.
+  подключением к Web ON path (Stage 2 подготовка, не блокер самого Stage 0 →
+  Stage 1 перехода, но остаётся open item плана).
+- [x] выбран и подтверждён green self-hosted CI на Mac mini (zero cost) — см.
+  Slice 0.4.
+- [x] добавлен бесплатный dependency audit (`scripts/audit_deps.py`,
+  `.github/workflows/ci.yml` + `dependency-audit.yml`) — см. Slice 0.4.
 
 ## Исходное состояние
 
