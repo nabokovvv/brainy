@@ -21,6 +21,18 @@ class WebSearchError(RuntimeError):
     """Content-free provider error suitable for rotation and user fallback."""
 
 
+class TransientSearchError(WebSearchError):
+    """A temporary provider failure (timeout, rate limit, 5xx, bad payload).
+
+    The provider should be skipped for this request but stays eligible next time —
+    a transient blip must not disable a provider for the rest of the month.
+    """
+
+
+class ProviderAuthError(WebSearchError):
+    """A permanent provider failure (bad or expired key). Disable for the month."""
+
+
 class SearchUnavailableError(WebSearchError):
     """No configured search provider can currently serve the request."""
 
@@ -82,6 +94,15 @@ class MonthlyQuotaLedger:
             state = self._load()
             self._roll_month(state)
             state["global_disabled"] = True
+            self._save(state)
+
+    async def disable_if_exhausted(self) -> None:
+        """Latch Web ON off only when every provider is exhausted or failed."""
+        async with self._lock:
+            state = self._load()
+            self._roll_month(state)
+            if self._all_unavailable(state):
+                state["global_disabled"] = True
             self._save(state)
 
     def _load(self) -> dict[str, Any]:
@@ -233,24 +254,25 @@ class RotatingSearchProvider:
             attempted = True
             try:
                 results = tuple(await provider.search(request))
-            except Exception:
+            except ProviderAuthError:
+                # Permanent failure: stop spending on this provider this month.
                 await self._ledger.mark_failed(config.name)
+                continue
+            except Exception:
+                # Transient failure: skip for this request; the provider stays
+                # eligible so a blip cannot disable Web ON for the month.
                 continue
             had_success = True
             if results:
                 return results
         if had_success:
             return ()
+        # Only latch Web ON off when every provider is genuinely out of quota or
+        # permanently failed — never because a single request hit transient errors.
+        await self._ledger.disable_if_exhausted()
         if not attempted:
-            await self._disable_if_exhausted()
             raise SearchUnavailableError("web search quota unavailable")
-        await self._disable_if_exhausted()
         raise SearchUnavailableError("all web search providers failed")
-
-    async def _disable_if_exhausted(self) -> None:
-        if await self._ledger.is_globally_disabled():
-            return
-        await self._ledger.disable_global()
 
     async def aclose(self) -> None:
         for _, provider in self._providers:
@@ -299,22 +321,27 @@ async def _request(client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.
         response = await client.request(
             "POST" if "json" in kwargs else "GET", url, timeout=8, **kwargs
         )
+        if response.status_code in (401, 403):
+            # Bad or expired key: retrying this month will not help.
+            raise ProviderAuthError(f"search api auth {response.status_code}")
         if response.status_code >= 400:
-            raise WebSearchError(f"search api status {response.status_code}")
+            # Rate limits (429), server errors (5xx), and other 4xx are treated
+            # as transient so one blip cannot kill the provider for the month.
+            raise TransientSearchError(f"search api status {response.status_code}")
         return response
     except WebSearchError:
         raise
     except (httpx.HTTPError, TimeoutError) as exc:
-        raise WebSearchError("search api request failed") from exc
+        raise TransientSearchError("search api request failed") from exc
 
 
 def _json_object(response: httpx.Response) -> Mapping[str, Any]:
     try:
         payload = response.json()
     except (ValueError, json.JSONDecodeError) as exc:
-        raise WebSearchError("search api returned invalid json") from exc
+        raise TransientSearchError("search api returned invalid json") from exc
     if not isinstance(payload, Mapping):
-        raise WebSearchError("search api returned invalid payload")
+        raise TransientSearchError("search api returned invalid payload")
     return payload
 
 

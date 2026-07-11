@@ -12,11 +12,13 @@ import httpx
 from brainy_core.providers.web_search import (
     BraveSearchProvider,
     MonthlyQuotaLedger,
+    ProviderAuthError,
     ProviderConfig,
     RotatingSearchProvider,
     SearchUnavailableError,
     SerpApiSearchProvider,
     TavilySearchProvider,
+    TransientSearchError,
 )
 from brainy_core.search import SearchQuery, SearchResult
 
@@ -143,6 +145,66 @@ class RotationTests(unittest.IsolatedAsyncioTestCase):
             state = json.loads(path.read_text())
 
         self.assertTrue(state["global_disabled"])
+
+    async def test_transient_failure_keeps_provider_eligible(self) -> None:
+        # A blip must not disable the provider or Web ON while quota remains.
+        class FlakyProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def search(self, request: SearchQuery) -> tuple[SearchResult, ...]:
+                self.calls += 1
+                if self.calls == 1:
+                    raise TransientSearchError("temporary blip")
+                return (SearchResult("brave", "https://b.example", "ok", 1, "brave"),)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            configs = (ProviderConfig("brave", "key", 10),)
+            ledger = MonthlyQuotaLedger(path, configs)
+            provider = RotatingSearchProvider(((configs[0], FlakyProvider()),), ledger)
+            with self.assertRaises(SearchUnavailableError):
+                await provider.search(SearchQuery("question", "en"))
+            after_blip = json.loads(path.read_text())
+            self.assertFalse(after_blip["global_disabled"])
+            self.assertFalse(after_blip["providers"]["brave"]["failed"])
+            # Next request recovers because the provider was never marked failed.
+            results = await provider.search(SearchQuery("question", "en"))
+
+        self.assertEqual({r.provider for r in results}, {"brave"})
+
+    async def test_auth_failure_marks_provider_failed(self) -> None:
+        class AuthFailingProvider:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def search(self, request: SearchQuery) -> tuple[SearchResult, ...]:
+                raise ProviderAuthError("bad key")
+
+        class WorkingProvider:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def search(self, request: SearchQuery) -> tuple[SearchResult, ...]:
+                return (SearchResult(self.name, f"https://{self.name}.example", "ok", 1, self.name),)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            configs = (ProviderConfig("tavily", "key", 10), ProviderConfig("brave", "key", 10))
+            ledger = MonthlyQuotaLedger(path, configs)
+            provider = RotatingSearchProvider(
+                (
+                    (configs[0], AuthFailingProvider("tavily")),
+                    (configs[1], WorkingProvider("brave")),
+                ),
+                ledger,
+            )
+            results = await provider.search(SearchQuery("question", "en"))
+            state = json.loads(path.read_text())
+
+        self.assertEqual({r.provider for r in results}, {"brave"})
+        self.assertTrue(state["providers"]["tavily"]["failed"])
+        self.assertFalse(state["global_disabled"])
 
 
 if __name__ == "__main__":
