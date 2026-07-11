@@ -59,6 +59,7 @@ def _load_bot_with_telegram_stub():
     telegram_error.BadRequest = _TelegramError
     telegram_error.NetworkError = _TelegramError
     telegram_error.TimedOut = _TelegramError
+    telegram_error.TelegramError = _TelegramError
     telegram.error = telegram_error
 
     modules = {
@@ -117,6 +118,7 @@ class _Bot:
         self.delete_fails = delete_fails
         self.sent: list[tuple[tuple[object, ...], dict[str, object]]] = []
         self.deleted: list[tuple[object, ...]] = []
+        self.drafts: list[dict[str, object]] = []
 
     async def send_message(self, *args: object, **kwargs: object) -> object:
         self.sent.append((args, kwargs))
@@ -126,6 +128,10 @@ class _Bot:
         self.deleted.append(args)
         if self.delete_fails:
             raise RuntimeError("status cleanup failed")
+
+    async def send_message_draft(self, **kwargs: object) -> bool:
+        self.drafts.append(kwargs)
+        return True
 
 
 class _FailingTranscriber:
@@ -166,6 +172,19 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         }
 
         self.assertFalse([name for name in removed_handlers if hasattr(bot, name)])
+
+    async def test_progress_draft_uses_nonzero_id_and_empty_thinking_text(self) -> None:
+        telegram_bot = _Bot()
+
+        sent = await bot._send_progress_draft(telegram_bot, 42)
+
+        self.assertTrue(sent)
+        self.assertEqual(telegram_bot.drafts[0]["chat_id"], 42)
+        self.assertGreater(telegram_bot.drafts[0]["draft_id"], 0)
+        self.assertEqual(telegram_bot.drafts[0]["text"], "")
+
+    async def test_progress_draft_is_optional_for_old_wrappers(self) -> None:
+        self.assertFalse(await bot._send_progress_draft(object(), 42))
 
     async def test_cancelling_idle_worker_does_not_over_acknowledge_queue(self) -> None:
         queue: StablePriorityQueue[object] = StablePriorityQueue(maxsize=1)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import itertools
 import logging
 import re
 import tempfile
@@ -41,6 +42,7 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+_draft_ids = itertools.count(1)
 
 # ---------------------------------------------------------------------------#
 #                           Language Detection                               #
@@ -358,6 +360,23 @@ async def send_typing_periodically(bot, chat_id):
         pass  # Task was cancelled, expected behavior
 
 
+async def _send_progress_draft(bot, chat_id: int) -> bool:
+    """Show Telegram's ephemeral animated Thinking draft when supported."""
+
+    send_draft = getattr(bot, "send_message_draft", None)
+    if send_draft is None:
+        return False
+    try:
+        await asyncio.wait_for(
+            send_draft(chat_id=chat_id, draft_id=next(_draft_ids), text=""),
+            timeout=2,
+        )
+        return True
+    except (TimeoutError, telegram.error.TelegramError):
+        logger.info("Telegram message draft unavailable; using typing fallback")
+        return False
+
+
 def _clean_text_for_plain_send(text: str) -> str:
     # Rule 1: Remove all backslashes and all asterisks, except for newlines.
     cleaned_text = text.replace("\\", "").replace("*", "")
@@ -452,6 +471,7 @@ async def fast_reply_handler(
     llm_semaphore = context.application.bot_data["llm_semaphore"]
 
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    draft_task = asyncio.create_task(_send_progress_draft(context.bot, update.effective_chat.id))
     try:
         provider = context.application.bot_data.get("inference_provider")
         if provider is None:
@@ -472,7 +492,8 @@ async def fast_reply_handler(
             await update.message.reply_text(translator.get_string("error_fast_reply_empty", lang))
             return
 
-        telegram_text = escape_markdown_v2(final_answer)
+        latency_badge = f"⚡ {max(result.latency_ms, 0) / 1000:.1f}s"
+        telegram_text = escape_markdown_v2(f"{final_answer}\n\n{latency_badge}")
 
         await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
     except ProviderError as exc:
@@ -481,6 +502,10 @@ async def fast_reply_handler(
     except Exception as exc:
         logger.error("Fast reply failed type=%s", type(exc).__name__)
         await update.message.reply_text(translator.get_string("error_generic", lang))
+    finally:
+        if not draft_task.done():
+            draft_task.cancel()
+        await asyncio.gather(draft_task, return_exceptions=True)
 
 
 # ---------------------------------------------------------------------------#

@@ -234,7 +234,7 @@ requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'research'", specifier = ">=4.13,<5" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "openai-whisper", specifier = ">=20231117" },
-    { name = "python-telegram-bot", extras = ["job-queue"], specifier = ">=22.2,<23" },
+    { name = "python-telegram-bot", extras = ["job-queue"], specifier = ">=22.8,<23" },
     { name = "scikit-learn", marker = "extra == 'research'", specifier = ">=1.7,<2" },
     { name = "sentence-transformers", marker = "extra == 'research'", specifier = ">=5,<6" },
     { name = "spacy", marker = "extra == 'research'", specifier = ">=3.8,<4" },

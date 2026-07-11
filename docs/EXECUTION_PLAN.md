@@ -241,6 +241,12 @@ Full-context retention smoke прошёл на фактических
 - Зафиксировать точный установленный tag Gemma на Mac и использовать его как первый local benchmark candidate.
 - Добавить latency/source badge и feedback button.
 
+Checkpoint UX: Bot API 10.0+ `sendMessageDraft` подключён через PTB 22.8 как
+неблокирующий fail-soft animated Thinking preview; typing остаётся fallback. Это
+основа для Rich Messages Bot API 10.1. Local-ответы получили numeric latency badge.
+Настоящий token streaming, Rich Message final render и feedback button остаются
+следующими slices.
+
 Gate:
 
 - минимум 15-question multilingual fixture и loopback-only runner сохранены в
