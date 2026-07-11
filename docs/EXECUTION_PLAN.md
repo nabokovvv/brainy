@@ -178,9 +178,10 @@ Gate:
 - [x] Выбран self-hosted runner на Mac mini (машина всегда online) — zero cost,
   без hosted Actions minutes/billing. Workflow: `.github/workflows/ci.yml`
   (compile check, `ruff check`, `ruff format --check`, `pytest -q`).
-- [ ] Зарегистрировать GitHub Actions self-hosted runner на самом Mac mini
-  (labels `self-hosted, macos, mac-mini`) — это ручной шаг с токеном из GitHub
-  Settings → Actions → Runners, выполняется на самой машине, не удалённо.
+- [x] Зарегистрирован GitHub Actions self-hosted runner на Mac mini `mac-mini`
+  (labels `self-hosted, macos, mac-mini`), запущен как сервис
+  (`Runner.Listener run --startuptype service`), статус Idle в
+  Settings → Actions → Runners.
 - [ ] В CI не передавать real provider keys и не запускать quota-consuming smoke tests.
 - [~] Dependency/security audit: codex добавил `scripts/audit_deps.py`
   (запускает `pip-audit`/`safety`, fail-closed на high/critical, без платных
