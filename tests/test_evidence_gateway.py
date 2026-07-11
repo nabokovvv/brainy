@@ -88,6 +88,26 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(item.evidence_id, context)
             self.assertNotIn(item.canonical_url, context)
 
+    async def test_history_is_inserted_between_system_and_web_context_turn(self):
+        from brainy_core.inference import ChatMessage
+
+        bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "en"))
+        history = (
+            ChatMessage(role="user", content="earlier question"),
+            ChatMessage(role="assistant", content="earlier answer"),
+        )
+        request = GroundedSynthesizer(FakeInference()).build_request(
+            "question", "en", bundle, history=history
+        )
+
+        roles = [m.role for m in request.messages]
+        self.assertEqual(roles[0], "system")
+        self.assertEqual(roles[1:3], ["user", "assistant"])
+        self.assertEqual(request.messages[1].content, "earlier question")
+        self.assertEqual(request.messages[2].content, "earlier answer")
+        self.assertEqual(request.messages[-1].role, "user")
+        self.assertIn("Web context:", request.messages[-1].content)
+
     async def test_detailed_synthesis_has_a_larger_bounded_output(self):
         bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "en"))
         synthesizer = GroundedSynthesizer(FakeInference())

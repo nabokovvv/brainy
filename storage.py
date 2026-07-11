@@ -11,7 +11,9 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+DEFAULT_MEMORY_BUDGET = 1000
 
 SCHEMA_SQL = """
 PRAGMA journal_mode = WAL;
@@ -26,6 +28,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     web_enabled INTEGER NOT NULL DEFAULT 0,
     language TEXT NOT NULL DEFAULT 'en',
     persona TEXT NOT NULL DEFAULT 'assistant',
+    memory_budget INTEGER NOT NULL DEFAULT 1000,
     updated_at REAL NOT NULL
 );
 """
@@ -33,6 +36,9 @@ CREATE TABLE IF NOT EXISTS user_settings (
 MIGRATION_SQL: dict[int, str] = {
     2: """
     ALTER TABLE user_settings ADD COLUMN persona TEXT NOT NULL DEFAULT 'assistant';
+    """,
+    3: """
+    ALTER TABLE user_settings ADD COLUMN memory_budget INTEGER NOT NULL DEFAULT 1000;
     """,
 }
 
@@ -43,6 +49,7 @@ class UserSettings:
     web_enabled: bool
     language: str
     persona: str
+    memory_budget: int
     updated_at: float
 
 
@@ -62,6 +69,7 @@ class UserSettingsRepo:
         web_enabled: Optional[bool] = None,
         language: Optional[str] = None,
         persona: Optional[str] = None,
+        memory_budget: Optional[int] = None,
     ) -> UserSettings:
         now = time.time()
         existing = self._store.get(chat_id)
@@ -71,6 +79,7 @@ class UserSettingsRepo:
                 web_enabled=web_enabled if web_enabled is not None else False,
                 language=language if language is not None else "en",
                 persona=persona if persona is not None else "assistant",
+                memory_budget=memory_budget if memory_budget is not None else DEFAULT_MEMORY_BUDGET,
                 updated_at=now,
             )
         else:
@@ -79,6 +88,9 @@ class UserSettingsRepo:
                 web_enabled=web_enabled if web_enabled is not None else existing.web_enabled,
                 language=language if language is not None else existing.language,
                 persona=persona if persona is not None else existing.persona,
+                memory_budget=memory_budget
+                if memory_budget is not None
+                else existing.memory_budget,
                 updated_at=now,
             )
         self._store[chat_id] = settings
@@ -133,7 +145,8 @@ class SQLiteUserSettingsRepo:
 
     def get(self, chat_id: int) -> Optional[UserSettings]:
         cur = self._conn.execute(
-            "SELECT chat_id, web_enabled, language, persona, updated_at FROM user_settings WHERE chat_id = ?",
+            "SELECT chat_id, web_enabled, language, persona, memory_budget, updated_at "
+            "FROM user_settings WHERE chat_id = ?",
             (chat_id,),
         )
         row = cur.fetchone()
@@ -144,7 +157,8 @@ class SQLiteUserSettingsRepo:
             web_enabled=bool(row[1]),
             language=row[2],
             persona=row[3],
-            updated_at=row[4],
+            memory_budget=row[4],
+            updated_at=row[5],
         )
 
     def upsert(
@@ -154,6 +168,7 @@ class SQLiteUserSettingsRepo:
         web_enabled: Optional[bool] = None,
         language: Optional[str] = None,
         persona: Optional[str] = None,
+        memory_budget: Optional[int] = None,
     ) -> UserSettings:
         now = time.time()
         existing = self.get(chat_id)
@@ -163,6 +178,7 @@ class SQLiteUserSettingsRepo:
                 web_enabled=web_enabled if web_enabled is not None else False,
                 language=language if language is not None else "en",
                 persona=persona if persona is not None else "assistant",
+                memory_budget=memory_budget if memory_budget is not None else DEFAULT_MEMORY_BUDGET,
                 updated_at=now,
             )
         else:
@@ -171,16 +187,20 @@ class SQLiteUserSettingsRepo:
                 web_enabled=web_enabled if web_enabled is not None else existing.web_enabled,
                 language=language if language is not None else existing.language,
                 persona=persona if persona is not None else existing.persona,
+                memory_budget=memory_budget
+                if memory_budget is not None
+                else existing.memory_budget,
                 updated_at=now,
             )
         self._conn.execute(
             """
-            INSERT INTO user_settings (chat_id, web_enabled, language, persona, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO user_settings (chat_id, web_enabled, language, persona, memory_budget, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 web_enabled = excluded.web_enabled,
                 language = excluded.language,
                 persona = excluded.persona,
+                memory_budget = excluded.memory_budget,
                 updated_at = excluded.updated_at
             """,
             (
@@ -188,6 +208,7 @@ class SQLiteUserSettingsRepo:
                 int(settings.web_enabled),
                 settings.language,
                 settings.persona,
+                settings.memory_budget,
                 settings.updated_at,
             ),
         )
@@ -201,11 +222,16 @@ class SQLiteUserSettingsRepo:
 
     def all(self) -> list[UserSettings]:
         cur = self._conn.execute(
-            "SELECT chat_id, web_enabled, language, persona, updated_at FROM user_settings"
+            "SELECT chat_id, web_enabled, language, persona, memory_budget, updated_at FROM user_settings"
         )
         return [
             UserSettings(
-                chat_id=r[0], web_enabled=bool(r[1]), language=r[2], persona=r[3], updated_at=r[4]
+                chat_id=r[0],
+                web_enabled=bool(r[1]),
+                language=r[2],
+                persona=r[3],
+                memory_budget=r[4],
+                updated_at=r[5],
             )
             for r in cur.fetchall()
         ]
@@ -238,6 +264,7 @@ class AsyncUserSettingsRepo:
         web_enabled: Optional[bool] = None,
         language: Optional[str] = None,
         persona: Optional[str] = None,
+        memory_budget: Optional[int] = None,
     ) -> UserSettings:
         async with self._lock:
             return await asyncio.to_thread(
@@ -246,6 +273,7 @@ class AsyncUserSettingsRepo:
                 web_enabled=web_enabled,
                 language=language,
                 persona=persona,
+                memory_budget=memory_budget,
             )
 
     async def close(self) -> None:

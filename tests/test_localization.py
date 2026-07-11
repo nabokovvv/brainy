@@ -61,6 +61,12 @@ EXPECTED_KEYS = {
     "persona_sarcastic_desc",
     "persona_invalid",
     "persona_set",
+    "memory_prompt",
+    "memory_off",
+    "memory_small",
+    "memory_large",
+    "memory_invalid",
+    "memory_set",
 }
 EXPECTED_CONTENT_LANGUAGES = {"de", "en", "es", "id", "pt", "ru", "tr"}
 EXPECTED_CONTENT_KEYS = {

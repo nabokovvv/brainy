@@ -156,6 +156,7 @@ class GroundedSynthesizer:
         *,
         detailed: bool = False,
         persona: str = DEFAULT_PERSONA,
+        history: Sequence[ChatMessage] = (),
     ) -> ChatRequest:
         context = "\n\n".join(item.text for item in bundle.items)
         answer_style = (
@@ -175,6 +176,7 @@ class GroundedSynthesizer:
         return ChatRequest(
             messages=(
                 ChatMessage(role="system", content=system_prompt),
+                *history,
                 ChatMessage(role="user", content=user_prompt),
             ),
             max_output_tokens=900 if detailed else 500,

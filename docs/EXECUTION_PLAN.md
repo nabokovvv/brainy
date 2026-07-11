@@ -95,7 +95,7 @@ Stage 0 закрыт 2026-07-11. До перехода к Stage 1 остаютс
 - `.env` не игнорируется, хотя README предлагает его использовать; tracked `config.py` одновременно указан в ignore.
 - Нет streaming: «Fast» показывает typing до полного ответа.
 - Состояние, очередь и настройки пользователей теряются при рестарте.
-- Бот не хранит историю сообщений: каждый запрос обрабатывается изолированно, без multi-turn контекста (см. `docs/BACKLOG_IDEAS.md`).
+ - Multi-turn memory работает только in-memory и теряется при рестарте: содержимое диалога намеренно не пишется на диск, персистится лишь настройка `memory_budget` (см. `docs/BACKLOG_IDEAS.md`).
 
 На момент первичного аудита baseline-команда падала на syntax error:
 
@@ -280,10 +280,15 @@ Full-context retention smoke прошёл на фактических
   - [x] Добавить latency badge и feedback button (👍/👎, sampled every 8-12 replies,
    no dialogue-text storage — см. `docs/FEEDBACK_DESIGN.md`, `brainy_core/feedback.py`).
    Source badge остаётся open для Web ON.
-  - [x] Выбор персоны (tone-only system-prompt prefix, per-chat в chat_data/SQLite
-   рядом с Web OFF/ON; 4 персоны — Assistant/Kawaii/Bro/Sarcastic rival; locale-parity
-   на всех 8 локалях; toggle не меняет grounding/citation format). Реализовано в
-   `brainy_core/persona.py` + `bot.py` + `storage.py`, см. `docs/BACKLOG_IDEAS.md`.
+   - [x] Выбор персоны (tone-only system-prompt prefix, per-chat в chat_data/SQLite
+    рядом с Web OFF/ON; 4 персоны — Assistant/Kawaii/Bro/Sarcastic rival; locale-parity
+    на всех 8 локалях; toggle не меняет grounding/citation format). Реализовано в
+    `brainy_core/persona.py` + `bot.py` + `storage.py`, см. `docs/BACKLOG_IDEAS.md`.
+   - [x] Char-budget multi-turn memory (per-chat, in-memory only; выбор 0/1000/10000
+    символов — ⚡/🐇/🐢; whole-message tail bounded by budget, never split; применяется к
+    local fast path и Web ON synthesis; на диск пишется только настройка `memory_budget`,
+    содержимое диалога — никогда; locale-parity на всех 8 локалях). Реализовано в
+    `brainy_core/memory.py` + `bot.py` + `storage.py` (schema v3), см. `docs/BACKLOG_IDEAS.md`.
 
 Checkpoint UX: Bot API 10.0+ `sendMessageDraft` подключён через PTB 22.8 как
 неблокирующий fail-soft animated Thinking preview; typing остаётся fallback. Это

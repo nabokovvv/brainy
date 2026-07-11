@@ -243,6 +243,15 @@ class AsyncUserSettingsRepoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.language, "ru")
         self.assertTrue(settings.web_enabled)
         self.assertEqual(settings.persona, "bro")
+        self.assertEqual(settings.memory_budget, 1000)
+
+    async def test_serialized_repo_persists_memory_budget(self) -> None:
+        await self.repo.upsert(43, memory_budget=10000)
+        settings = await self.repo.get(43)
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.memory_budget, 10000)
+        default = await self.repo.get(44)
+        self.assertIsNone(default)
 
 
 class OpenRepoFactoryTests(unittest.TestCase):
@@ -308,6 +317,99 @@ class MigrationStubTests(unittest.TestCase):
             repo.close()
             self.assertIsNotNone(settings)
             self.assertEqual(settings.persona, "bro")
+            self.assertEqual(settings.language, "ru")
+        finally:
+            import os
+
+            os.unlink(tmp_path)
+
+
+class MemoryBudgetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo = UserSettingsRepo()
+
+    def test_default_memory_budget_is_1000(self) -> None:
+        settings = self.repo.upsert(123)
+        self.assertEqual(settings.memory_budget, 1000)
+
+    def test_upsert_updates_memory_budget(self) -> None:
+        self.repo.upsert(123, memory_budget=1000)
+        updated = self.repo.upsert(123, memory_budget=10000)
+        self.assertEqual(updated.memory_budget, 10000)
+
+    def test_upsert_preserves_unset_memory_budget(self) -> None:
+        self.repo.upsert(123, web_enabled=True, language="de", memory_budget=0)
+        updated = self.repo.upsert(123, language="fr")
+        self.assertEqual(updated.memory_budget, 0)
+        self.assertEqual(updated.language, "fr")
+
+
+class SQLiteMemoryBudgetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.NamedTemporaryFile(delete=False)
+        self.tmp.close()
+        self.repo = SQLiteUserSettingsRepo(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.repo.close()
+        import os
+
+        os.unlink(self.tmp.name)
+
+    def test_default_memory_budget_is_1000(self) -> None:
+        self.repo.upsert(100)
+        settings = self.repo.get(100)
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.memory_budget, 1000)
+
+    def test_crud_persists_memory_budget(self) -> None:
+        self.repo.upsert(101, web_enabled=False, language="en", memory_budget=10000)
+        settings = self.repo.get(101)
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.memory_budget, 10000)
+
+    def test_memory_budget_persists_across_new_connection(self) -> None:
+        self.repo.upsert(102, memory_budget=0)
+        self.repo.close()
+        new_repo = SQLiteUserSettingsRepo(self.tmp.name)
+        settings = new_repo.get(102)
+        new_repo.close()
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings.memory_budget, 0)
+
+
+class MigrationV1ToV3Tests(unittest.TestCase):
+    def test_v1_database_migrates_through_persona_and_memory(self) -> None:
+        import sqlite3
+
+        from storage import SQLiteUserSettingsRepo
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            conn.executescript(
+                """
+                CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+                INSERT INTO schema_version (version) VALUES (1);
+                CREATE TABLE user_settings (
+                    chat_id INTEGER PRIMARY KEY,
+                    web_enabled INTEGER NOT NULL DEFAULT 0,
+                    language TEXT NOT NULL DEFAULT 'en',
+                    updated_at REAL NOT NULL
+                );
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            repo = SQLiteUserSettingsRepo(tmp_path)
+            repo.upsert(1, web_enabled=True, language="ru", persona="bro", memory_budget=10000)
+            settings = repo.get(1)
+            repo.close()
+            self.assertIsNotNone(settings)
+            self.assertEqual(settings.persona, "bro")
+            self.assertEqual(settings.memory_budget, 10000)
             self.assertEqual(settings.language, "ru")
         finally:
             import os

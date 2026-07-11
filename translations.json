@@ -49,7 +49,13 @@
     "persona_sarcastic": "Sarcastic rival",
     "persona_sarcastic_desc": "Sharp rival who teases and critiques.",
     "persona_invalid": "Unknown persona.",
-    "persona_set": "Persona set to {persona_name}."
+    "persona_set": "Persona set to {persona_name}.",
+    "memory_prompt": "Memory (previous messages sent to the model):",
+    "memory_off": "⚡ No memory",
+    "memory_small": "🐇 ~1000 characters",
+    "memory_large": "🐢 ~10000 characters",
+    "memory_invalid": "Unknown memory setting.",
+    "memory_set": "Memory: {memory_label}"
   },
   "es": {
     "welcome_new_user": "👋 ¡Hola! Soy Brainy, tu asistente de IA. El idioma está configurado en español. ¿Quieres cambiarlo?",
@@ -101,7 +107,13 @@
     "persona_sarcastic": "Rival sarcástico",
     "persona_sarcastic_desc": "Rival ingenioso que te provoca y critica.",
     "persona_invalid": "Persona desconocida.",
-    "persona_set": "Persona cambiada a {persona_name}."
+    "persona_set": "Persona cambiada a {persona_name}.",
+    "memory_prompt": "Memoria (mensajes anteriores enviados al modelo):",
+    "memory_off": "⚡ Sin memoria",
+    "memory_small": "🐇 ~1000 caracteres",
+    "memory_large": "🐢 ~10000 caracteres",
+    "memory_invalid": "Configuración de memoria desconocida.",
+    "memory_set": "Memoria: {memory_label}"
   },
   "ru": {
     "welcome_new_user": "👋 Привет! Я Brainy, ваш ИИ‑помощник. Сейчас выбран русский язык. Хотите сменить язык?",
@@ -153,7 +165,13 @@
     "persona_sarcastic": "Саркастичный соперник",
     "persona_sarcastic_desc": "Дерзкий соперник, подкалывает и критикует.",
     "persona_invalid": "Неизвестная персона.",
-    "persona_set": "Персона установлена: {persona_name}."
+    "persona_set": "Персона установлена: {persona_name}.",
+    "memory_prompt": "Память (предыдущие сообщения, отправляемые модели):",
+    "memory_off": "⚡ Без памяти",
+    "memory_small": "🐇 ~1000 символов",
+    "memory_large": "🐢 ~10000 символов",
+    "memory_invalid": "Неизвестная настройка памяти.",
+    "memory_set": "Память: {memory_label}"
   },
   "pt": {
     "welcome_new_user": "👋 Olá! Sou o Brainy, seu assistente de IA. O idioma está definido como português. Quer mudar?",
@@ -205,7 +223,13 @@
     "persona_sarcastic": "Rival sarcástico",
     "persona_sarcastic_desc": "Rival sarcástico que provoca e critica.",
     "persona_invalid": "Persona desconhecida.",
-    "persona_set": "Persona definida para {persona_name}."
+    "persona_set": "Persona definida para {persona_name}.",
+    "memory_prompt": "Memória (mensagens anteriores enviadas ao modelo):",
+    "memory_off": "⚡ Sem memória",
+    "memory_small": "🐇 ~1000 caracteres",
+    "memory_large": "🐢 ~10000 caracteres",
+    "memory_invalid": "Configuração de memória desconhecida.",
+    "memory_set": "Memória: {memory_label}"
   },
   "fr": {
     "welcome_new_user": "👋 Salut ! Je suis Brainy, votre assistant IA. La langue est réglée sur le français. Voulez‑vous la changer ?",
@@ -257,7 +281,13 @@
     "persona_sarcastic": "Rival sarcastique",
     "persona_sarcastic_desc": "Rival sarcastique qui taquine et critique.",
     "persona_invalid": "Persona inconnue.",
-    "persona_set": "Persona définie sur {persona_name}."
+    "persona_set": "Persona définie sur {persona_name}.",
+    "memory_prompt": "Mémoire (messages précédents envoyés au modèle) :",
+    "memory_off": "⚡ Sans mémoire",
+    "memory_small": "🐇 ~1000 caractères",
+    "memory_large": "🐢 ~10000 caractères",
+    "memory_invalid": "Paramètre de mémoire inconnu.",
+    "memory_set": "Mémoire : {memory_label}"
   },
   "de": {
     "welcome_new_user": "👋 Hallo! Ich bin Brainy, dein KI‑Assistent. Die Sprache ist auf Deutsch eingestellt. Möchtest du sie ändern?",
@@ -309,7 +339,13 @@
     "persona_sarcastic": "Sarkastischer Rivale",
     "persona_sarcastic_desc": "Scharfer Rivale, der neckt und kritisiert.",
     "persona_invalid": "Unbekannte Persona.",
-    "persona_set": "Persona auf {persona_name} gesetzt."
+    "persona_set": "Persona auf {persona_name} gesetzt.",
+    "memory_prompt": "Speicher (vorherige, an das Modell gesendete Nachrichten):",
+    "memory_off": "⚡ Kein Speicher",
+    "memory_small": "🐇 ~1000 Zeichen",
+    "memory_large": "🐢 ~10000 Zeichen",
+    "memory_invalid": "Unbekannte Speichereinstellung.",
+    "memory_set": "Speicher: {memory_label}"
   },
   "tr": {
     "welcome_new_user": "👋 Merhaba! Ben Brainy, yapay zekâ asistanın. Dil Türkçe olarak ayarlı. Değiştirmek ister misiniz?",
@@ -361,7 +397,13 @@
     "persona_sarcastic": "Sert rakip",
     "persona_sarcastic_desc": "Seninle dalga geçen ve eleştiren sert rakip.",
     "persona_invalid": "Bilinmeyen persona.",
-    "persona_set": "Persona {persona_name} olarak ayarlandı."
+    "persona_set": "Persona {persona_name} olarak ayarlandı.",
+    "memory_prompt": "Bellek (modele gönderilen önceki mesajlar):",
+    "memory_off": "⚡ Belleksiz",
+    "memory_small": "🐇 ~1000 karakter",
+    "memory_large": "🐢 ~10000 karakter",
+    "memory_invalid": "Bilinmeyen bellek ayarı.",
+    "memory_set": "Bellek: {memory_label}"
   },
   "id": {
     "welcome_new_user": "👋 Halo! Saya Brainy, asisten AI Anda. Bahasa disetel ke bahasa Indonesia. Ingin menggantinya?",
@@ -413,6 +455,12 @@
     "persona_sarcastic": "Rival tajam",
     "persona_sarcastic_desc": "Rival tajam yang menggoda dan mengkritik.",
     "persona_invalid": "Persona tidak dikenal.",
-    "persona_set": "Persona diatur ke {persona_name}."
+    "persona_set": "Persona diatur ke {persona_name}.",
+    "memory_prompt": "Memori (pesan sebelumnya yang dikirim ke model):",
+    "memory_off": "⚡ Tanpa memori",
+    "memory_small": "🐇 ~1000 karakter",
+    "memory_large": "🐢 ~10000 karakter",
+    "memory_invalid": "Pengaturan memori tidak dikenal.",
+    "memory_set": "Memori: {memory_label}"
   }
 }

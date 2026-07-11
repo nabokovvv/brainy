@@ -232,7 +232,12 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
             async def get(self, chat_id: int) -> object:
                 self.calls += 1
-                return SimpleNamespace(language="ru", web_enabled=True, persona="assistant")
+                return SimpleNamespace(
+                    language="ru",
+                    web_enabled=True,
+                    persona="assistant",
+                    memory_budget=1000,
+                )
 
         repo = Repo()
         context = SimpleNamespace(
@@ -245,7 +250,12 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             context.chat_data,
-            {"language": "ru", "web_enabled": True, "persona": "assistant"},
+            {
+                "language": "ru",
+                "web_enabled": True,
+                "persona": "assistant",
+                "memory_budget": 1000,
+            },
         )
         self.assertEqual(repo.calls, 1)
 
@@ -262,13 +272,15 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         await bot.settings(update, context)
 
-        self.assertEqual(len(telegram_bot.sent), 3)
+        self.assertEqual(len(telegram_bot.sent), 4)
         self.assertEqual(telegram_bot.sent[0][1]["text"], "web_status_on:ru")
         self.assertEqual(telegram_bot.sent[1][1]["text"], "language_selection_prompt:ru")
         self.assertTrue(telegram_bot.sent[2][1]["text"].startswith("persona_prompt:ru"))
+        self.assertTrue(telegram_bot.sent[3][1]["text"].startswith("memory_prompt:ru"))
         self.assertIsNotNone(telegram_bot.sent[0][1]["reply_markup"])
         self.assertIsNotNone(telegram_bot.sent[1][1]["reply_markup"])
         self.assertIsNotNone(telegram_bot.sent[2][1]["reply_markup"])
+        self.assertIsNotNone(telegram_bot.sent[3][1]["reply_markup"])
 
     async def test_progress_draft_uses_nonzero_id_and_empty_thinking_text(self) -> None:
         telegram_bot = _Bot()

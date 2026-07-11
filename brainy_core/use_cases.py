@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from brainy_core.inference import ChatMessage, ChatRequest
 from brainy_core.persona import DEFAULT_PERSONA, with_persona
 
@@ -11,9 +13,16 @@ def build_fast_chat_request(
     language: str,
     *,
     persona: str = DEFAULT_PERSONA,
+    history: Sequence[ChatMessage] = (),
     max_output_tokens: int = 400,
 ) -> ChatRequest:
-    """Build the direct local-chat request without routing or provider work."""
+    """Build the direct local-chat request without routing or provider work.
+
+    ``history`` is a sequence of prior user/assistant turns (whole messages,
+    never split) appended after the system prompt and before the current user
+    turn. Callers are responsible for bounding its size (see
+    ``brainy_core.memory``).
+    """
 
     system_prompt = with_persona(
         "You are Brainy, a fast and helpful multilingual Telegram assistant. "
@@ -26,6 +35,7 @@ def build_fast_chat_request(
     return ChatRequest(
         messages=(
             ChatMessage(role="system", content=system_prompt),
+            *tuple(history),
             ChatMessage(role="user", content=query),
         ),
         max_output_tokens=max_output_tokens,

@@ -74,9 +74,17 @@ parity на 8 локалях, тесты) — в `brainy_core/persona.py` + `bot
 - Не хранить персону как часть приватного контента, подлежащего retention
   policy — это настройка, не пользовательский диалог.
 
-## Idea: добавить multi-turn память (сейчас её нет вообще)
+## Idea: добавить multi-turn память — РЕАЛИЗОВАНО (Stage 1)
 
-**Текущее фактическое поведение (проверено по коду, не описано ни в
+> **Статус: реализовано.** Char-budget multi-turn memory подключён per-chat,
+> in-memory only (`brainy_core/memory.py`). Выбор бюджета 0/1000/10000 символов
+> (⚡/🐇/🐢, default 1000) рядом с Web OFF/ON и персоной; whole-message tail,
+> bounded by budget, never split; применяется к local fast path и Web ON
+> synthesis. На диск пишется только настройка `memory_budget` (schema v3),
+> содержимое диалога — никогда (правило AGENTS.md). Заметки ниже сохранены как
+> исходная мотивация.
+
+**Исходное фактическое поведение (проверено по коду, не описано ни в
 `PRODUCT_STRATEGY.md`, ни в `EXECUTION_PLAN.md`):** бот не хранит и не
 переиспользует историю сообщений вообще. Ни в `bot.py`, ни в
 `brainy_core/*` нет накопления `messages[]`/history — каждый inference
