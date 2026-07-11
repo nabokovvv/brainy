@@ -53,9 +53,25 @@ Stage 0 ещё не закрыт. До exit gate остаются:
   `MAC_MINI_BENCHMARK_BASELINE.md`.
 - [x] real smoke Telegram подтверждён 2026-07-11: живой `bot.py` на Mac mini
   (`@askbrainy_com_bot`), реальные сообщения через Telegram, latency ~0.8s
-  (короткий ответ) до ~10s (длинный ответ) через local Ollama. Владелец
-  заметил несколько багов/доработок при живом тесте — зафиксировать их
-  отдельно перед закрытием Stage 0/переходом в Stage 1 checkpoint review.
+  (короткий ответ) до ~10s (длинный ответ) через local Ollama. Владелец нашёл
+  при живом тесте баги ниже (список), требующие фикса до формального закрытия
+  Stage 0/перехода в Stage 1 checkpoint review:
+  - **[bug] Web OFF/ON и языковая клавиатура недоступны повторно.** Обе
+    клавиатуры (`get_route_keyboard`, `get_language_keyboard`/
+    `get_all_languages_keyboard`, `bot.py`) отправляются один раз при `/start`
+    и редактируются in-place через `ACTION_TOGGLE_WEB`/`ACTION_SHOW_LANGUAGES`;
+    нет команды/меню, чтобы вернуться к ним после того как сообщение со
+    старой клавиатурой уходит вверх чата. По факту это регрессия против уже
+    отмеченного `[x]` пункта "session-persistent переключатель Web OFF/ON" —
+    переключатель session-persistent в `chat_data`, но не reachable UI-wise.
+    Нужно решение: дублировать клавиатуру под каждым fast-reply (как раньше
+    была смена режимов) или ввести `/settings` команду с обоими переключателями.
+  - **[unconfirmed] Голосовое сообщение не транскрибировалось** во время
+    live smoke: `Voice transcription failed type=FileNotFoundError` в логе.
+    Вероятная причина — окружение SSH-сессии смоука (non-login shell, `PATH`
+    без `/opt/homebrew/bin`, где `ffmpeg`/`whisper-cli`), а не баг кода.
+    Нужен повторный тест голосового сообщения через launchd-сервис или
+    interactive shell с полным `PATH`, прежде чем считать это реальным дефектом.
 - завершить characterization и доработку optional research utilities перед их
   подключением к Web ON path (Stage 2 подготовка, не блокер самого Stage 0 →
   Stage 1 перехода, но остаётся open item плана).
