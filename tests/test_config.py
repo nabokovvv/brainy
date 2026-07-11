@@ -17,6 +17,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.llm_client, "ollama")
         self.assertEqual(settings.search_backend, "disabled")
         self.assertFalse(settings.web_enabled_default)
+        self.assertTrue(settings.telegram_rich_messages)
 
     def test_telegram_token_is_checked_only_for_bot_runtime(self) -> None:
         settings = Settings.from_env({})
@@ -91,6 +92,10 @@ class SettingsTests(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(ConfigurationError, message):
                     Settings.from_env({name: value})
+
+    def test_invalid_rich_messages_flag_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigurationError, "Invalid boolean"):
+            Settings.from_env({"TELEGRAM_RICH_MESSAGES": "sometimes"})
 
     def test_timeout_matches_provider_maximum(self) -> None:
         settings = Settings.from_env({"OLLAMA_TIMEOUT": "121"})

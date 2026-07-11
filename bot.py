@@ -31,6 +31,7 @@ from brainy_core.providers import OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
+from telegram_renderer import RichMessageRenderer, sanitize_untrusted_markdown
 from utils import strip_think
 
 # ---------------------------------------------------------------------------#
@@ -570,9 +571,19 @@ async def fast_reply_handler(
             return
 
         latency_badge = f"⚡ {max(result.latency_ms, 0) / 1000:.1f}s"
-        telegram_text = escape_markdown_v2(f"{final_answer}\n\n{latency_badge}")
-
-        await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
+        rich_renderer = context.application.bot_data.get("rich_message_renderer")
+        rich_sent = False
+        if rich_renderer is not None:
+            rich_sent = await rich_renderer.send_final(
+                context.bot,
+                chat_id=update.effective_chat.id,
+                answer=final_answer,
+                badge=latency_badge,
+            )
+        if not rich_sent:
+            fallback_answer = sanitize_untrusted_markdown(final_answer, neutralize_plain_urls=True)
+            telegram_text = escape_markdown_v2(f"{fallback_answer}\n\n{latency_badge}")
+            await send_long_message(update, telegram_text, parse_mode=ParseMode.MARKDOWN_V2)
     except ProviderError as exc:
         logger.warning("Fast reply provider failure code=%s", exc.code.value)
         await update.message.reply_text(translator.get_string("error_generic", lang))
@@ -1109,6 +1120,9 @@ async def main_async() -> None:
     application.bot_data["llm_semaphore"] = llm_semaphore
     application.bot_data["whisper_transcriber"] = whisper_transcriber
     application.bot_data["inference_provider"] = inference_provider
+    application.bot_data["rich_message_renderer"] = RichMessageRenderer(
+        enabled=config.TELEGRAM_RICH_MESSAGES
+    )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))

@@ -76,6 +76,7 @@ LLM_CLIENT=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
 WEB_ENABLED_DEFAULT=false
 SEARCH_BACKEND=disabled
+TELEGRAM_RICH_MESSAGES=true
 ```
 
 `OLLAMA_MODEL=gemma4:e2b` is confirmed on the target Mac mini. Its first 8K/32K/64K
@@ -115,7 +116,11 @@ uv run --env-file .env python bot.py
 ```
 
 The Telegram process requires `TELEGRAM_TOKEN`; disabled external providers do not
-require their keys.
+require their keys. Rich Bot API 10.1 finals are attempted through PTB's raw API
+escape hatch; unsupported or rejected rich payloads automatically use the regular
+MarkdownV2/plain persistent-message path. A transport timeout is inherently ambiguous
+because Bot API sends have no idempotency key; Brainy prioritizes delivery, so that rare
+case may produce a duplicate final instead of silently losing the answer.
 
 ## Local quality gates
 
@@ -136,7 +141,8 @@ providers.
 - The route switch is session-persistent and captured with each buffered request;
   durable persistence across bot restarts is not implemented yet.
 - Web search is disabled until a safe zero-cost provider contract is implemented.
-- Telegram progressive delivery and Web ON search are not implemented yet.
+- Telegram progressive delivery and safe rich finals are implemented; trusted web
+  citations and Web ON search are not implemented yet.
 - The repository is under active Stage 0 cleanup and is not production-ready.
 
 ## License

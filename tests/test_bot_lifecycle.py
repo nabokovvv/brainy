@@ -58,6 +58,7 @@ def _load_bot_with_telegram_stub():
     telegram_error = types.ModuleType("telegram.error")
     telegram_error.BadRequest = _TelegramError
     telegram_error.NetworkError = _TelegramError
+    telegram_error.RetryAfter = _TelegramError
     telegram_error.TimedOut = _TelegramError
     telegram_error.TelegramError = _TelegramError
     telegram.error = telegram_error
@@ -165,6 +166,15 @@ class _NonStreamingProvider:
             model=ProviderModel(provider="fake", name="model", is_local=True),
             latency_ms=500,
         )
+
+
+class _SuccessfulRichRenderer:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def send_final(self, bot_instance: object, **kwargs: object) -> bool:
+        self.calls.append(kwargs)
+        return True
 
 
 class _FailingTranscriber:
@@ -290,6 +300,35 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(final_messages), 1)
         self.assertIn("Fallback answer", final_messages[0])
+
+    async def test_fast_reply_prefers_rich_final_without_duplicate_regular_message(self) -> None:
+        telegram_bot = _Bot()
+        rich_renderer = _SuccessfulRichRenderer()
+        message = _Message()
+        update = SimpleNamespace(effective_chat=SimpleNamespace(id=42), message=message)
+        context = SimpleNamespace(
+            bot=telegram_bot,
+            chat_data={"language": "en"},
+            application=SimpleNamespace(
+                bot_data={
+                    "translator": _Translator(),
+                    "llm_semaphore": asyncio.Semaphore(1),
+                    "inference_provider": _NonStreamingProvider(),
+                    "rich_message_renderer": rich_renderer,
+                }
+            ),
+        )
+
+        async def forbidden_regular_send(*args: object, **kwargs: object) -> None:
+            raise AssertionError("A successful rich final must not be sent twice")
+
+        with patch.object(bot, "send_long_message", forbidden_regular_send):
+            await bot.fast_reply_handler(update, context, "question")
+
+        self.assertEqual(len(rich_renderer.calls), 1)
+        self.assertEqual(rich_renderer.calls[0]["chat_id"], 42)
+        self.assertEqual(rich_renderer.calls[0]["answer"], "Fallback answer.")
+        self.assertEqual(rich_renderer.calls[0]["badge"], "⚡ 0.5s")
 
     async def test_cancelling_idle_worker_does_not_over_acknowledge_queue(self) -> None:
         queue: StablePriorityQueue[object] = StablePriorityQueue(maxsize=1)
