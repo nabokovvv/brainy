@@ -68,7 +68,7 @@ class SettingsTests(unittest.TestCase):
     def test_legacy_yandex_backend_is_removed(self) -> None:
         settings = Settings.from_env({"SEARCH_BACKEND": "yandex"})
 
-        with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND.*Stage 2"):
+        with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND"):
             settings.validate(require_web=False)
 
     def test_context_supports_owner_confirmed_64k_limit(self) -> None:
@@ -109,13 +109,12 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND"):
             settings.validate()
 
-    def test_future_duckduckgo_backend_cannot_be_enabled_before_implementation(self) -> None:
+    def test_duckduckgo_backend_enables_the_first_web_search_adapter(self) -> None:
         settings = Settings.from_env(
             {"SEARCH_BACKEND": "duckduckgo", "WEB_ENABLED_DEFAULT": "true"}
         )
 
-        with self.assertRaisesRegex(ConfigurationError, "SEARCH_BACKEND.*Stage 2"):
-            settings.validate()
+        settings.validate()
 
     def test_removed_legacy_environment_knobs_do_not_break_local_import(self) -> None:
         env = os.environ.copy()

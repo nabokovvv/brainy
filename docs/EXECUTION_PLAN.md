@@ -315,8 +315,12 @@ Recommended commits:
 - [x] Добавлен provider-neutral `SearchQuery`/`SearchResult`/`SearchProvider` contract
   с bounded limit, абсолютными HTTP(S)-URL и canonical URL без fragment tracking;
   backend и сетевой runtime остаются следующим slice.
-- Подключить первый backend к этому контракту.
-- Shared async client, timeouts, retry только для transient errors, circuit breaker и cache.
+- [x] Подключён первый DuckDuckGo-compatible HTML adapter: injected/shared `httpx`
+  client (или lazy owned client), locale hint, bounded 512 KiB response, safe URL
+  admission, один retry только для transient transport/HTTP ошибок, TTL cache,
+  pacing и circuit breaker. Contract tests используют только `httpx.MockTransport`.
+- Lifespan wiring этого shared client и Web ON answer orchestration остаются следующим
+  вертикальным slice: adapter пока намеренно не вызывается Telegram handler-ом.
 - URL canonicalization/dedup до загрузки страниц.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
 - Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.
