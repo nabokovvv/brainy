@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from bot import (
     _clean_text_for_plain_send,
+    _first_http_url,
     escape_markdown_v2,
     send_long_message,
 )
@@ -31,6 +32,12 @@ class EscapeMarkdownV2LinkTests(unittest.TestCase):
         out = escape_markdown_v2("array[0](not a url)")
         self.assertNotIn("](not a url)", out)
         self.assertIn("\\[0\\]", out)
+
+    def test_first_http_url_prefers_markdown_link_target(self):
+        self.assertEqual(
+            _first_http_url("Read [this](https://example.com/story?q=1) first."),
+            "https://example.com/story?q=1",
+        )
 
 
 class FakeUpdate:
@@ -197,6 +204,25 @@ class SendLongMessageTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("reply_markup", call.kwargs)
         # Last should have it
         self.assertIn("reply_markup", calls[-1].kwargs)
+
+    async def test_link_preview_options_only_on_final_chunk(self):
+        from telegram import LinkPreviewOptions
+
+        upd = self._make_update()
+        text = "x " * 5000 + "[source](https://example.com/story)"
+        options = LinkPreviewOptions(url="https://example.com/story", is_disabled=False)
+
+        await send_long_message(
+            upd,
+            text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            link_preview_options=options,
+        )
+
+        calls = upd.message.reply_text.call_args_list
+        for call in calls[:-1]:
+            self.assertNotIn("link_preview_options", call.kwargs)
+        self.assertIs(calls[-1].kwargs["link_preview_options"], options)
 
     # --- _clean_text_for_plain_send ---
     def test_clean_text_for_plain_send_removes_backslashes_asterisks_urls(self):

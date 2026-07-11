@@ -14,7 +14,8 @@ from brainy_core.scheduling import StablePriorityQueue
 
 class _DummyTelegramObject:
     def __init__(self, *args: object, **kwargs: object) -> None:
-        pass
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 class _DummyFilter:
@@ -381,6 +382,8 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(final_messages), 1)
         self.assertIn("Fallback answer", final_messages[0][0])
         self.assertIsNotNone(final_messages[0][1])
+        self.assertTrue(final_messages[0][1].prefer_large_media)
+        self.assertTrue(final_messages[0][1].show_above_text)
 
     async def test_cancelling_idle_worker_does_not_over_acknowledge_queue(self) -> None:
         queue: StablePriorityQueue[object] = StablePriorityQueue(maxsize=1)

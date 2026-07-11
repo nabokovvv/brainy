@@ -127,6 +127,7 @@ _SOURCES_LINE = re.compile(r"^\s*(\d+)\.\s+(https?://\S+)\s*$", re.M)
 
 # markdown-ссылки модели [текст](http…): сохраняем как кликабельные
 _MD_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+_HTTP_URL = re.compile(r"https?://[^\s<>\]\)]+")
 PH_LINK = "￰"  # сентинел вокруг индекса защищённой ссылки
 
 # плейсхолдеры
@@ -255,6 +256,27 @@ def escape_markdown_v2(text: str) -> str:
     for idx, link in enumerate(link_store):
         result = result.replace(f"{PH_LINK}{idx}{PH_LINK}", link)
     return result
+
+
+def _first_http_url(text: str) -> str | None:
+    """Return the first HTTP(S) URL suitable for Telegram's link preview."""
+
+    markdown_link = _MD_LINK.search(text)
+    if markdown_link is not None:
+        return markdown_link.group(2)
+    plain_url = _HTTP_URL.search(text)
+    return plain_url.group(0) if plain_url is not None else None
+
+
+def _visible_link_preview(url: str | None = None) -> LinkPreviewOptions:
+    """Ask Telegram for a clearly visible preview of a URL in this message."""
+
+    return LinkPreviewOptions(
+        url=url,
+        is_disabled=False,
+        prefer_large_media=True,
+        show_above_text=True,
+    )
 
 
 def get_language_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
@@ -832,7 +854,7 @@ async def fast_reply_handler(
             telegram_text,
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=feedback_keyboard,
-            link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_small_media=True),
+            link_preview_options=_visible_link_preview(_first_http_url(final_answer)),
         )
     except ProviderError as exc:
         logger.warning("Fast reply provider failure code=%s", exc.code.value)
@@ -954,11 +976,7 @@ async def grounded_web_reply_handler(
         ]
         message = f"{body}\n\n{chr(10).join(source_lines)}" if source_lines else body
         link_preview = (
-            LinkPreviewOptions(
-                url=top_citations[0].canonical_url,
-                is_disabled=False,
-                prefer_small_media=True,
-            )
+            _visible_link_preview(top_citations[0].canonical_url)
             if top_citations
             else LinkPreviewOptions(is_disabled=True)
         )
@@ -1357,7 +1375,12 @@ async def send_long_message(update, text: str, **kwargs):
 
     rest = text
     # клавиатуру/inline-кнопки показываем только в последнем сообщении
-    common_kwargs = {k: v for k, v in kwargs.items() if k != "reply_markup"}
+    # A selected preview URL has to be present in the message being sent.  Do
+    # not pass it to earlier chunks: Telegram rejects that combination, and it
+    # used to make long Web ON answers lose their final delivery/preview.
+    common_kwargs = {
+        k: v for k, v in kwargs.items() if k not in {"reply_markup", "link_preview_options"}
+    }
     last_kwargs = kwargs
 
     while rest:
