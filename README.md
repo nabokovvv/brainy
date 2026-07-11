@@ -4,16 +4,16 @@ Brainy is a fast, multilingual Telegram chat built around local-first inference.
 product direction is one chat with an explicit `Web OFF/ON` switch:
 
 - `Web OFF` sends the request directly to a local Ollama model.
-- `Web ON` uses a zero-cost, best-effort search path and will return verifiable
-  sources once the evidence/synthesis slice lands.
+- `Web ON` uses the configured zero-cost provider rotation and returns verifiable
+  sources when at least one provider has usable quota and responds successfully.
 
 The project is at the **Stage 0 / early Stage 1 checkpoint**. The runtime now exposes
 one chat with an explicit `Web OFF/ON` route switch; the old Deep/Web modes and their
 provider stack have been removed. The spaCy/reranker/page/Wikidata research utilities
-are preserved as a dormant optional extra for Stage 2. Web ON uses the pinned `ddgs`
-library through a provider-neutral adapter with explicit `backend="duckduckgo"`.
-`auto`, unknown or paid backends, and ddgs DHT are not enabled; Web ON fails closed when no evidence is
-returned rather than silently returning a local answer as fresh.
+are preserved as a dormant optional extra for Stage 2. Web ON rotates configured
+zero-cost Brave Search, Tavily, and SerpAPI adapters with a persistent monthly
+quota ledger. Providers are queried in parallel; when every configured provider is
+exhausted or unavailable, Web ON is disabled until the next UTC calendar month.
 
 ## Product boundaries
 
@@ -77,17 +77,25 @@ these local defaults during Stage 0:
 LLM_CLIENT=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
 WEB_ENABLED_DEFAULT=false
-SEARCH_BACKEND=ddgs
+SEARCH_BACKEND=rotation
 TELEGRAM_RICH_MESSAGES=true
 ```
 
 `OLLAMA_MODEL=gemma4:e2b` is confirmed on the target Mac mini. Its first 8K/32K/64K
 single-user baseline is recorded in [the Mac mini benchmark](docs/MAC_MINI_BENCHMARK_BASELINE.md).
 Keep `WEB_ENABLED_DEFAULT=false` until the Web ON evidence/synthesis slice is wired
-into the Telegram runtime. `SEARCH_BACKEND=ddgs` selects the free, best-effort
-adapter and explicitly uses DuckDuckGo; it has no API key or paid fallback.
-Do not use `auto` or enable ddgs DHT: those choices change the upstream engine or
-expose queries to a peer network.
+into the Telegram runtime. `SEARCH_BACKEND=rotation` enables only providers with
+configured keys. The quota ledger is stored at
+`~/.local/state/brainy/search_quota.json` by default and contains counters/status,
+never prompts, answers, or search content. The monthly limits are configured with
+`BRAVE_SEARCH_MONTHLY_LIMIT=900`, `TAVILY_MONTHLY_LIMIT=900`, and
+`SERPAPI_MONTHLY_LIMIT=200`.
+
+The rotation order is Brave Search API, Tavily, then SerpAPI. A request reserves
+one monthly slot from every configured provider and runs those calls concurrently;
+successful results are merged and deduplicated by the evidence gateway. An API
+failure marks that provider unavailable for the current month. If no provider
+remains, Web ON is disabled until the next UTC month.
 
 `OLLAMA_TIMEOUT` (seconds, default `120`, must stay within `0-120`) and
 `OLLAMA_CONTEXT_TOKENS` (default `65536`, must stay within `1-65536`) control the
@@ -146,9 +154,9 @@ providers.
 
 - The route switch is session-persistent and captured with each buffered request;
   durable persistence across bot restarts is not implemented yet.
-- The ddgs DuckDuckGo adapter is best-effort and can still be challenged or
-  rate-limited by upstream services; Web ON reports unavailable when no evidence
-  is returned.
+- Search providers are best-effort and can still fail or report exhausted quotas;
+  provider errors rotate to the remaining configured providers, while all-provider
+  failure disables Web ON until the next UTC calendar month.
 - Telegram progressive delivery, safe rich finals, EvidenceBundle synthesis, and
   citation validation are implemented; a real search result is still required for
   a live citation smoke.

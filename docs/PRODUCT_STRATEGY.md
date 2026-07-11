@@ -77,11 +77,15 @@ Production runtime не должен зависеть от MCP-процесса.
 
 Решение с нулевым бюджетом:
 
-1. Начать с бесплатного DuckDuckGo-compatible Python/HTTP backend как best-effort search path, с cache, throttling и circuit breaker.
-2. Удалённый legacy Yandex path не переносим в новый runtime. Возврат возможен только
-   через новый adapter и при доказанной невозможности списаний; для MVP он не нужен.
-3. Brave и любые backends с платным тарифом/риском списания не включать.
-4. Свой Docker search engine не поднимаем на MVP.
+1. Ротировать только явно настроенные free-quota adapters: Brave Search API → Tavily
+   → SerpAPI. Лимиты ведутся по UTC календарному месяцу: 900, 900 и 200 запросов.
+2. Один запрос fan-out выполняется параллельно по всем доступным providers; это
+   ускоряет latency, но расходует по одному месячному credit на каждый вызванный
+   provider.
+3. При исчерпании локального счётчика, API quota/error или полном отсутствии
+   доступных providers Web ON fail-closes до начала следующего UTC месяца.
+4. Не включать auto-routing, платные endpoints, автопополнение или скрытый fallback;
+   provider-specific API keys читаются только из environment.
 
 Все backends возвращают общий `SearchResult(title, url, snippet, rank, provider, published_at)`.
 

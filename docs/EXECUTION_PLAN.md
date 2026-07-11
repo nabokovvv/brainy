@@ -315,10 +315,12 @@ Recommended commits:
 - [x] Добавлен provider-neutral `SearchQuery`/`SearchResult`/`SearchProvider` contract
   с bounded limit, абсолютными HTTP(S)-URL и canonical URL без fragment tracking;
   backend и сетевой runtime остаются следующим slice.
-- [x] Добавлен pinned `ddgs` adapter с явным `backend="duckduckgo"`, async
-  thread offload, bounded timeout и mapping `title`/`href`/`body` в SearchResult.
-- [x] Web ON handler вызывает SearchGateway и GroundedSynthesizer; search failure
-  fail-closed возвращает локализованную unavailable-ошибку.
+- [x] Добавлена parallel rotation Brave Search API → Tavily → SerpAPI с общим
+  SearchResult contract, shared HTTP client и provider-specific parsing.
+- [x] Добавлен persistent UTC-month quota ledger: 900/900/200 requests,
+  provider failure/quota exhaustion и global fail-closed до следующего месяца.
+- [x] Web ON handler вызывает SearchGateway и GroundedSynthesizer; all-provider
+  failure fail-closed возвращает локализованную unavailable-ошибку.
 - [x] Добавлен `SearchGateway -> EvidenceBundle -> GroundedSynthesizer`: стабильные
   evidence IDs, canonical URL dedupe, token budget и валидация citation IDs.
 - [x] `SearchGateway` принимает bounded `page_loader` и пакует возвращённые chunks
@@ -342,9 +344,10 @@ Recommended commits:
 
 ### Backends
 
-- Бесплатный `ddgs` provider с явным DuckDuckGo backend как единственный search path.
-- Yandex fallback только при гарантированном отсутствии списаний, с configurable folder id и без XML leakage за пределы adapter.
-- Любой provider с риском платного запроса выключен на уровне policy/config.
+- Brave Search API, Tavily и SerpAPI подключаются только при наличии явного ключа
+  и лимита в environment; provider без ключа не вызывается.
+- Лимитный rotation state сохраняется только как metadata/counters, не как user content.
+- Любой provider с риском платного запроса или неявным auto-routing выключен.
 
 ### Answer path
 
@@ -386,7 +389,7 @@ Recommended commits:
 
 Gate:
 
-- общий contract suite проходит для DuckDuckGo-compatible/Yandex fixtures;
+- общий contract suite проходит для Brave/Tavily/SerpAPI fixtures;
 - основной free search failure -> разрешённый zero-cost fallback;
 - все providers fail -> bounded transparent response;
 - citation support >= 90%, stale-answer rate < 2%;

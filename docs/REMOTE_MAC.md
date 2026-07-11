@@ -70,25 +70,24 @@ Ollama loopback API на target готов. Однако живой Telegram run
 найден: в runtime-каталоге отсутствует `.env`, поэтому нельзя запускать Bot API
 smoke или отправлять реальные сообщения без явного provisioning token.
 
-Реальный DuckDuckGo smoke с нейтральным публичным запросом получил HTTP 202 и
-anti-bot challenge. Текущий adapter вернул пустую выдачу; Web ON обработчик
-должен fail closed с `web_unavailable`, но grounded synthesis и rendering
-citations при этой выдаче не запускаются. Не записывать query, SERP или model
-response в документацию и логи.
+Legacy DuckDuckGo path удалён. Новый Web ON runtime использует параллельную
+ротацию Brave Search API, Tavily и SerpAPI с лимитами 900/900/200 запросов в UTC
+месяц. Счётчики хранятся в `SEARCH_QUOTA_STATE_PATH` и не содержат пользовательский
+контент. При ошибках всех доступных API или исчерпании всех лимитов Web ON
+отключается до следующего UTC месяца.
 
-После замены provider на `ddgs==9.14.4` и явного `backend="duckduckgo"` повторный
-real smoke также завершился content-free `SearchUnavailableError` примерно за
-1.27 s. Это подтверждает upstream block на target, а не дефект legacy parser.
+После настройки трёх ключей в защищённом runtime `.env` реальный parallel smoke
+успешно получил 14 результатов за 5.83 s; ledger записал по одному использованному
+запросу на каждого provider. Полный pipeline smoke успешно собрал 9 evidence items,
+валидировал 5 citations и завершился за 4.29 s: search 0.74 s, local synthesis
+3.55 s. Query, snippets и ответ в метрики/логи не записывались.
 
 ### Дальнейшие шаги
 
-1. Создать защищённый runtime `.env` на Mac (не добавлять в Git) с существующим
-   `TELEGRAM_TOKEN`, `SEARCH_BACKEND=ddgs`, `WEB_ENABLED_DEFAULT=true` и
-   `TELEGRAM_RICH_MESSAGES=true`.
-2. Проверить `ddgs` с явным `backend="duckduckgo"`; не включать `auto`, DHT,
-   платный backend или скрытый fallback.
-3. После появления реальной выдачи запустить один нейтральный Telegram Web ON
+1. Добавить Telegram token в защищённый runtime `.env` (не добавлять в Git), если
+   нужен живой Bot API smoke; search keys уже сохранены с правами `600`.
+2. Запустить один нейтральный Telegram Web ON
    smoke, проверить canonical citation links и замерить search/synthesis/Telegram
    latency без сохранения текста пользователя или ответа.
-4. Отдельно повторить smoke при недоступном search backend и подтвердить
+3. Отдельно повторить smoke при недоступности всех search APIs и подтвердить
    локализованный `web_unavailable` без local fallback.

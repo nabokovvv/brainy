@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Sequence
 from urllib.parse import urlparse
@@ -162,11 +163,11 @@ class GroundedSynthesizer:
                 temperature=0.0,
             )
         )
+        payload = _parse_json_object(result.text)
         try:
-            payload = json.loads(result.text)
             answer = payload["answer"]
             raw_ids = payload.get("citation_ids", [])
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (KeyError, TypeError):
             raise ValueError("synthesis returned invalid structured output") from None
         if not isinstance(answer, str) or not answer.strip() or not isinstance(raw_ids, list):
             raise ValueError("synthesis returned invalid structured output")
@@ -177,6 +178,27 @@ class GroundedSynthesizer:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
+
+
+def _parse_json_object(text: str) -> dict[str, object]:
+    """Accept only one JSON object, tolerating common markdown wrappers."""
+
+    candidate = text.strip()
+    if candidate.startswith("```") and candidate.endswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE)
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        start, end = candidate.find("{"), candidate.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("synthesis returned invalid structured output") from None
+        try:
+            payload = json.loads(candidate[start : end + 1])
+        except json.JSONDecodeError:
+            raise ValueError("synthesis returned invalid structured output") from None
+    if not isinstance(payload, dict):
+        raise ValueError("synthesis returned invalid structured output")
+    return payload
 
 
 def _terms(text: str) -> set[str]:

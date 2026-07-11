@@ -7,7 +7,6 @@ requires-python = ">=3.11,<3.14"
 license = { file = "LICENSE" }
 dependencies = [
     "httpx>=0.28,<1",
-    "ddgs>=9.14,<10",
     "openai-whisper>=20231117",
     "python-telegram-bot[job-queue]>=22.8,<23",
     "torch>=2.3,<3",

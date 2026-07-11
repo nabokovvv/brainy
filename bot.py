@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import unquote
 
+import httpx
 import telegram.error
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram import InputFile
@@ -37,7 +38,8 @@ from brainy_core import (
     build_fast_chat_request,
 )
 from brainy_core.feedback import FeedbackEntry, FeedbackStore
-from brainy_core.providers import DDGSProvider, OllamaProvider
+from brainy_core.providers import OllamaProvider
+from brainy_core.providers.web_search import RotatingSearchProvider, build_rotating_provider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
@@ -1271,11 +1273,15 @@ async def main_async() -> None:
 
     # Search resources are created once per process and shared by the Web ON
     # gateway. Providers do not perform network I/O during construction.
-    search_provider: DDGSProvider | None = None
+    search_client: httpx.AsyncClient | None = None
+    search_provider: RotatingSearchProvider | None = None
     page_client = None
     page_fetcher = None
-    if config.SETTINGS.search_backend == "ddgs":
-        search_provider = DDGSProvider(timeout_seconds=min(config.OLLAMA_TIMEOUT, 30.0))
+    if config.SETTINGS.search_backend == "rotation":
+        search_client = httpx.AsyncClient(timeout=httpx.Timeout(8.0, connect=5.0))
+        search_provider = build_rotating_provider(config.SETTINGS, search_client)
+        if search_provider is None:
+            logger.warning("No search provider keys configured; Web ON is unavailable")
         try:
             import aiohttp
 
@@ -1369,6 +1375,8 @@ async def main_async() -> None:
             await _best_effort_cleanup("provider.close", inference_provider.aclose)
         if search_provider is not None:
             await _best_effort_cleanup("search_provider.close", search_provider.aclose)
+        if search_client is not None:
+            await _best_effort_cleanup("search_client.close", search_client.aclose)
         if page_client is not None:
             await _best_effort_cleanup("page_client.close", page_client.close)
         if application_initialized:

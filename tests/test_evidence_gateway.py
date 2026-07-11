@@ -36,12 +36,16 @@ class AlsoFailingSearch:
 class FakeInference:
     model = ProviderModel("fake", "test", True)
 
-    def __init__(self, citation_id: str = "E1"):
+    def __init__(self, citation_id: str = "E1", wrapped: bool = False):
         self.citation_id = citation_id
+        self.wrapped = wrapped
 
     async def chat(self, request):
+        payload = f'{{"answer":"Ответ","citation_ids":["{self.citation_id}","unknown","{self.citation_id}"]}}'
+        if self.wrapped:
+            payload = f"Some preface.```json\n{payload}\n```"
         return ChatResult(
-            f'{{"answer":"Ответ","citation_ids":["{self.citation_id}","unknown","{self.citation_id}"]}}',
+            payload,
             self.model,
             1,
         )
@@ -78,6 +82,13 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(answer.citation_ids, (bundle.items[0].evidence_id,))
         self.assertEqual(answer.citations[0].canonical_url, "https://example.com/a")
+
+    async def test_synthesis_accepts_wrapped_json_without_accepting_unstructured_text(self):
+        bundle = await SearchGateway(FakeSearch()).build_bundle(SearchQuery("question", "ru"))
+        answer = await GroundedSynthesizer(
+            FakeInference(bundle.items[0].evidence_id, wrapped=True)
+        ).synthesize("question", "ru", bundle)
+        self.assertEqual(answer.citation_ids, (bundle.items[0].evidence_id,))
 
     async def test_gateway_packs_page_chunks_with_provenance_and_trust(self):
         async def load_pages(urls):

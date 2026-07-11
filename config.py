@@ -64,6 +64,13 @@ class Settings:
     web_enabled_default: bool
     search_backend: str
     search_fallback_backend: str
+    search_quota_state_path: str
+    brave_search_api_key: str | None
+    brave_search_monthly_limit: int
+    tavily_api_key: str | None
+    tavily_monthly_limit: int
+    serpapi_api_key: str | None
+    serpapi_monthly_limit: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -102,6 +109,23 @@ class Settings:
             search_fallback_backend=source.get("SEARCH_FALLBACK_BACKEND", "disabled")
             .strip()
             .lower(),
+            search_quota_state_path=source.get(
+                "SEARCH_QUOTA_STATE_PATH", "~/.local/state/brainy/search_quota.json"
+            ).strip(),
+            brave_search_api_key=_optional_env(source.get("BRAVE_SEARCH_API_KEY")),
+            brave_search_monthly_limit=_env_int(
+                source.get("BRAVE_SEARCH_MONTHLY_LIMIT"),
+                default=900,
+                name="BRAVE_SEARCH_MONTHLY_LIMIT",
+            ),
+            tavily_api_key=_optional_env(source.get("TAVILY_API_KEY")),
+            tavily_monthly_limit=_env_int(
+                source.get("TAVILY_MONTHLY_LIMIT"), default=900, name="TAVILY_MONTHLY_LIMIT"
+            ),
+            serpapi_api_key=_optional_env(source.get("SERPAPI_API_KEY")),
+            serpapi_monthly_limit=_env_int(
+                source.get("SERPAPI_MONTHLY_LIMIT"), default=200, name="SERPAPI_MONTHLY_LIMIT"
+            ),
         )
 
     def validate(self, *, require_telegram: bool = False, require_web: bool | None = None) -> None:
@@ -138,17 +162,29 @@ class Settings:
                 errors.append("WHISPER_CPP_FFMPEG must be non-empty")
 
         web_required = self.web_enabled_default if require_web is None else require_web
-        if self.search_backend not in {"disabled", "ddgs"}:
-            errors.append("SEARCH_BACKEND must be 'disabled' or 'ddgs'")
-        if self.search_fallback_backend not in {"disabled", "ddgs"}:
-            errors.append("SEARCH_FALLBACK_BACKEND must be 'disabled' or 'ddgs'")
+        if self.search_backend not in {"disabled", "rotation"}:
+            errors.append("SEARCH_BACKEND must be 'disabled' or 'rotation'")
+        if self.search_fallback_backend not in {"disabled"}:
+            errors.append("SEARCH_FALLBACK_BACKEND must be 'disabled'")
         if (
             self.search_fallback_backend == self.search_backend
             and self.search_backend != "disabled"
         ):
             errors.append("SEARCH_FALLBACK_BACKEND must differ from SEARCH_BACKEND")
-        if web_required and self.search_backend != "ddgs":
-            errors.append("Web search requires SEARCH_BACKEND=ddgs")
+        limits = (
+            ("BRAVE_SEARCH_MONTHLY_LIMIT", self.brave_search_monthly_limit),
+            ("TAVILY_MONTHLY_LIMIT", self.tavily_monthly_limit),
+            ("SERPAPI_MONTHLY_LIMIT", self.serpapi_monthly_limit),
+        )
+        for name, limit in limits:
+            if limit < 1:
+                errors.append(f"{name} must be positive")
+        if web_required and self.search_backend != "rotation":
+            errors.append("Web search requires SEARCH_BACKEND=rotation")
+        if web_required and not any(
+            (self.brave_search_api_key, self.tavily_api_key, self.serpapi_api_key)
+        ):
+            errors.append("Web search requires at least one search provider API key")
 
         if errors:
             raise ConfigurationError("; ".join(errors))

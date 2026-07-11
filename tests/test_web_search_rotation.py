@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+import httpx
+
+from brainy_core.providers.web_search import (
+    BraveSearchProvider,
+    MonthlyQuotaLedger,
+    ProviderConfig,
+    RotatingSearchProvider,
+    SearchUnavailableError,
+    SerpApiSearchProvider,
+    TavilySearchProvider,
+)
+from brainy_core.search import SearchQuery, SearchResult
+
+
+class WebProviderMappingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_mappings_preserve_snippets(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "api.search.brave.com":
+                return httpx.Response(
+                    200,
+                    json={
+                        "web": {
+                            "results": [
+                                {"title": "B", "url": "https://b.example", "description": "brave"}
+                            ]
+                        }
+                    },
+                )
+            if request.url.host == "api.tavily.com":
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [{"title": "T", "url": "https://t.example", "content": "tavily"}]
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "organic_results": [
+                        {"title": "S", "link": "https://s.example", "snippet": "serp"}
+                    ]
+                },
+            )
+
+        query = SearchQuery("question", "en", limit=1)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            results = await asyncio.gather(
+                BraveSearchProvider(client, "b").search(query),
+                TavilySearchProvider(client, "t").search(query),
+                SerpApiSearchProvider(client, "s").search(query),
+            )
+
+        self.assertEqual([result[0].snippet for result in results], ["brave", "tavily", "serp"])
+
+
+class RotationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_providers_are_called_in_parallel_and_results_merge(self) -> None:
+        class FakeProvider:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def search(self, request: SearchQuery) -> tuple[SearchResult, ...]:
+                await asyncio.sleep(0.03)
+                return (
+                    SearchResult(
+                        self.name, f"https://{self.name}.example", self.name, 1, self.name
+                    ),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            configs = tuple(
+                ProviderConfig(name, "key", 2) for name in ("brave", "tavily", "serpapi")
+            )
+            ledger = MonthlyQuotaLedger(Path(directory) / "quota.json", configs)
+            provider = RotatingSearchProvider(
+                tuple((config, FakeProvider(config.name)) for config in configs), ledger
+            )
+            started = time.monotonic()
+            results = await provider.search(SearchQuery("question", "en"))
+
+        self.assertLess(time.monotonic() - started, 0.08)
+        self.assertEqual({result.provider for result in results}, {"brave", "tavily", "serpapi"})
+
+    async def test_all_failures_disable_web_until_next_month(self) -> None:
+        class FailingProvider:
+            async def search(self, request: SearchQuery) -> tuple[SearchResult, ...]:
+                raise RuntimeError("upstream error")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            configs = (ProviderConfig("brave", "key", 2),)
+            ledger = MonthlyQuotaLedger(path, configs)
+            provider = RotatingSearchProvider(((configs[0], FailingProvider()),), ledger)
+            with self.assertRaises(SearchUnavailableError):
+                await provider.search(SearchQuery("question", "en"))
+            with self.assertRaises(SearchUnavailableError):
+                await provider.search(SearchQuery("question", "en"))
+            state = json.loads(path.read_text())
+
+        self.assertTrue(state["global_disabled"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -115,15 +115,14 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "SEARCH_FALLBACK_BACKEND"):
             settings.validate()
 
-    def test_same_primary_and_fallback_are_rejected(self) -> None:
+    def test_rotation_backend_enables_the_web_search_adapter(self) -> None:
         settings = Settings.from_env(
-            {"SEARCH_BACKEND": "duckduckgo", "SEARCH_FALLBACK_BACKEND": "duckduckgo"}
+            {
+                "SEARCH_BACKEND": "rotation",
+                "WEB_ENABLED_DEFAULT": "true",
+                "BRAVE_SEARCH_API_KEY": "test-key",
+            }
         )
-        with self.assertRaisesRegex(ConfigurationError, "must differ"):
-            settings.validate()
-
-    def test_ddgs_backend_enables_the_web_search_adapter(self) -> None:
-        settings = Settings.from_env({"SEARCH_BACKEND": "ddgs", "WEB_ENABLED_DEFAULT": "true"})
 
         settings.validate()
 
