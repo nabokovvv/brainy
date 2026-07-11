@@ -328,7 +328,10 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(final_messages), 1)
         self.assertIn("Fallback answer", final_messages[0])
 
-    async def test_fast_reply_prefers_rich_final_without_duplicate_regular_message(self) -> None:
+    async def test_fast_reply_uses_regular_send_to_keep_model_links(self) -> None:
+        # Fast Reply renders the model's markdown (including clickable links) via
+        # the regular send path; it must not route through the rich renderer,
+        # which strips links and cannot show a link preview.
         telegram_bot = _Bot()
         rich_renderer = _SuccessfulRichRenderer()
         message = _Message()
@@ -345,17 +348,18 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 }
             ),
         )
+        final_messages: list[tuple[str, object]] = []
 
-        async def forbidden_regular_send(*args: object, **kwargs: object) -> None:
-            raise AssertionError("A successful rich final must not be sent twice")
+        async def capture_final(update_arg, text: str, **kwargs: object) -> None:
+            final_messages.append((text, kwargs.get("link_preview_options")))
 
-        with patch.object(bot, "send_long_message", forbidden_regular_send):
+        with patch.object(bot, "send_long_message", capture_final):
             await bot.fast_reply_handler(update, context, "question")
 
-        self.assertEqual(len(rich_renderer.calls), 1)
-        self.assertEqual(rich_renderer.calls[0]["chat_id"], 42)
-        self.assertEqual(rich_renderer.calls[0]["answer"], "Fallback answer.")
-        self.assertEqual(rich_renderer.calls[0]["badge"], "⚡ 0.5s")
+        self.assertEqual(len(rich_renderer.calls), 0)
+        self.assertEqual(len(final_messages), 1)
+        self.assertIn("Fallback answer", final_messages[0][0])
+        self.assertIsNotNone(final_messages[0][1])
 
     async def test_cancelling_idle_worker_does_not_over_acknowledge_queue(self) -> None:
         queue: StablePriorityQueue[object] = StablePriorityQueue(maxsize=1)

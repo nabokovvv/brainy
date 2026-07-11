@@ -120,6 +120,10 @@ _BOLD_PAIR = re.compile(r"(?<!\\)\*(?!\s)([^*\n]+?)\*")
 # строки "1. https://..." (источники)
 _SOURCES_LINE = re.compile(r"^\s*(\d+)\.\s+(https?://\S+)\s*$", re.M)
 
+# markdown-ссылки модели [текст](http…): сохраняем как кликабельные
+_MD_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+PH_LINK = "￰"  # сентинел вокруг индекса защищённой ссылки
+
 # плейсхолдеры
 PH_MINUS = "\ufff1"
 PH_PLUS = "\ufff2"
@@ -179,9 +183,23 @@ def escape_markdown_v2(text: str) -> str:
     if not text:
         return text
     text = strip_think(normalize(text))
+
+    # Сохраняем markdown-ссылки модели [текст](http…) как кликабельные: прячем
+    # готовую MarkdownV2-ссылку за сентинел, чтобы её не тронуло экранирование,
+    # и восстанавливаем в самом конце.
+    link_store: list[str] = []
+
+    def _protect_link(m: "re.Match[str]") -> str:
+        label = escape_markdown(m.group(1), version=2)
+        url = escape_markdown(m.group(2), version=2, entity_type="text_link")
+        link_store.append(f"[{label}]({url})")
+        return f"{PH_LINK}{len(link_store) - 1}{PH_LINK}"
+
     parts = _CODE_SPLIT.split(text)  # [non-code, code, non-code, ...]
     for i in range(0, len(parts), 2):
         seg = parts[i]
+
+        seg = _MD_LINK.sub(_protect_link, seg)
 
         # источники "1. https://..." -> читаемая ссылка
         def _src_repl(m):
@@ -228,7 +246,10 @@ def escape_markdown_v2(text: str) -> str:
 
         parts[i] = seg
 
-    return "".join(parts)
+    result = "".join(parts)
+    for idx, link in enumerate(link_store):
+        result = result.replace(f"{PH_LINK}{idx}{PH_LINK}", link)
+    return result
 
 
 def get_language_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
@@ -694,25 +715,18 @@ async def fast_reply_handler(
             )
             feedback_keyboard = get_feedback_keyboard(context, lang, request_id)
 
-        rich_renderer = context.application.bot_data.get("rich_message_renderer")
-        rich_sent = False
-        if rich_renderer is not None:
-            rich_sent = await rich_renderer.send_final(
-                context.bot,
-                chat_id=update.effective_chat.id,
-                answer=final_answer,
-                badge=latency_badge,
-                reply_markup=feedback_keyboard,
-            )
-        if not rich_sent:
-            fallback_answer = sanitize_untrusted_markdown(final_answer, neutralize_plain_urls=True)
-            telegram_text = escape_markdown_v2(f"{fallback_answer}\n\n{latency_badge}")
-            await send_long_message(
-                update,
-                telegram_text,
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=feedback_keyboard,
-            )
+        # Fast Reply is the local route: no external injection vector, so render
+        # the model's markdown faithfully (bold, headings, lists, and clickable
+        # links) instead of stripping links via the rich renderer. escape_markdown_v2
+        # converts formatting and preserves [text](url) links as MarkdownV2.
+        telegram_text = escape_markdown_v2(f"{final_answer}\n\n{latency_badge}")
+        await send_long_message(
+            update,
+            telegram_text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=feedback_keyboard,
+            link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_small_media=True),
+        )
     except ProviderError as exc:
         logger.warning("Fast reply provider failure code=%s", exc.code.value)
         await update.message.reply_text(translator.get_string("error_generic", lang))

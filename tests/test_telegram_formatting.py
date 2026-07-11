@@ -5,9 +5,32 @@ from unittest.mock import AsyncMock, MagicMock
 
 from bot import (
     _clean_text_for_plain_send,
+    escape_markdown_v2,
     send_long_message,
 )
 from telegram.constants import ParseMode
+
+
+class EscapeMarkdownV2LinkTests(unittest.TestCase):
+    def test_model_link_is_preserved_as_clickable(self):
+        out = escape_markdown_v2("See [Wikipedia](https://en.wikipedia.org/wiki/Sponge).")
+        # Link syntax survives; the URL is not backslash-mangled.
+        self.assertIn("[Wikipedia](https://en.wikipedia.org/wiki/Sponge)", out)
+
+    def test_link_label_special_chars_are_escaped(self):
+        out = escape_markdown_v2("[a.b_c](https://example.com/x)")
+        self.assertIn("[a\\.b\\_c](https://example.com/x)", out)
+
+    def test_prose_around_link_is_still_escaped(self):
+        out = escape_markdown_v2("Version 1.0 at [site](https://example.com).")
+        self.assertIn("1\\.0", out)
+        self.assertIn("[site](https://example.com)", out)
+
+    def test_non_http_bracket_paren_is_not_turned_into_link(self):
+        # Only http(s) targets become links; ordinary "[x](y)" stays escaped text.
+        out = escape_markdown_v2("array[0](not a url)")
+        self.assertNotIn("](not a url)", out)
+        self.assertIn("\\[0\\]", out)
 
 
 class FakeUpdate:
