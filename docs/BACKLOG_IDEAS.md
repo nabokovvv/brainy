@@ -8,6 +8,12 @@
 Любая идея отсюда должна пройти обычный цикл: scope, acceptance criteria,
 тест/benchmark, отдельная ветка `codex/<issue>-<slug>`, review, commit.
 
+## Idea: 👍/👎 feedback без хранения текста диалогов
+
+Полный дизайн (event schema, privacy-риски, локализация, acceptance tests,
+минимальный slice) — в `docs/FEEDBACK_DESIGN.md`. Готов к превращению в slice
+после закрытия Stage 0.
+
 ## Idea: выбор персоны (personality) при старте бота
 
 Мотивация: аддиктивность за счёт тона ответа, а не за счёт возможностей
