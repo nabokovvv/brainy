@@ -74,5 +74,4 @@ Model file перенесён в постоянный
 
 ## Остаётся
 
-- exact Telegram-like `.oga` smoke нового FFmpeg→whisper.cpp adapter;
 - UI tests для progressive Telegram delivery и message limits.

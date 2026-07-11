@@ -220,8 +220,8 @@ single-user 8K/32K/64K baseline без нового swap; результаты �
 volatile `/tmp` в постоянный каталог Brainy. Optional whisper.cpp runtime adapter
 добавлен и прошёл real large-v3 smoke на встроенном публичном аудио; Python Whisper
 остаётся fallback для development. Telegram Ogg/Opus всегда конвертируется FFmpeg в
-mono 16K PCM WAV; exact `.oga` target smoke остаётся pending из-за исчерпанного
-approval budget среды, а не из-за ошибки runtime.
+mono 16K PCM WAV; exact `.oga` target smoke с large-v3 прошёл на встроенном публичном
+аудио.
 Full-context retention smoke прошёл на фактических
 32K/64K input tokens без нового swap, но с TTFT 70/192 s, поэтому это capability,
 а не fast default. Multilingual baseline дал 14/15 по ручной оценке;
