@@ -32,3 +32,6 @@ jobs:
 
       - name: Pytest
         run: uv run pytest -q
+
+      - name: Dependency audit
+        run: uv run python scripts/audit_deps.py --fail-on high
