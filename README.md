@@ -10,10 +10,10 @@ product direction is one chat with an explicit `Web OFF/ON` switch:
 The project is at the **Stage 0 / early Stage 1 checkpoint**. The runtime now exposes
 one chat with an explicit `Web OFF/ON` route switch; the old Deep/Web modes and their
 provider stack have been removed. The spaCy/reranker/page/Wikidata research utilities
-are preserved as a dormant optional extra for Stage 2. The first DuckDuckGo-compatible
-search adapter now has bounded retries, throttling, cache, and a circuit breaker.
-The evidence/synthesis path is still absent, so Web ON continues to fail closed rather
-than silently returning a local answer as fresh.
+are preserved as a dormant optional extra for Stage 2. Web ON uses the pinned `ddgs`
+library through a provider-neutral adapter with explicit `backend="duckduckgo"`.
+`auto`, unknown or paid backends, and ddgs DHT are not enabled; Web ON fails closed when no evidence is
+returned rather than silently returning a local answer as fresh.
 
 ## Product boundaries
 
@@ -77,15 +77,17 @@ these local defaults during Stage 0:
 LLM_CLIENT=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
 WEB_ENABLED_DEFAULT=false
-SEARCH_BACKEND=duckduckgo
+SEARCH_BACKEND=ddgs
 TELEGRAM_RICH_MESSAGES=true
 ```
 
 `OLLAMA_MODEL=gemma4:e2b` is confirmed on the target Mac mini. Its first 8K/32K/64K
 single-user baseline is recorded in [the Mac mini benchmark](docs/MAC_MINI_BENCHMARK_BASELINE.md).
 Keep `WEB_ENABLED_DEFAULT=false` until the Web ON evidence/synthesis slice is wired
-into the Telegram runtime. `SEARCH_BACKEND=duckduckgo` selects the available free,
-best-effort backend; it has no API key or paid fallback.
+into the Telegram runtime. `SEARCH_BACKEND=ddgs` selects the free, best-effort
+adapter and explicitly uses DuckDuckGo; it has no API key or paid fallback.
+Do not use `auto` or enable ddgs DHT: those choices change the upstream engine or
+expose queries to a peer network.
 
 `OLLAMA_TIMEOUT` (seconds, default `120`, must stay within `0-120`) and
 `OLLAMA_CONTEXT_TOKENS` (default `65536`, must stay within `1-65536`) control the
@@ -144,10 +146,12 @@ providers.
 
 - The route switch is session-persistent and captured with each buffered request;
   durable persistence across bot restarts is not implemented yet.
-- The first DuckDuckGo-compatible backend is implemented, but Web ON still has no
-  EvidenceBundle/cited synthesis and therefore transparently reports it unavailable.
-- Telegram progressive delivery and safe rich finals are implemented; trusted web
-  citations and Web ON search are not implemented yet.
+- The ddgs DuckDuckGo adapter is best-effort and can still be challenged or
+  rate-limited by upstream services; Web ON reports unavailable when no evidence
+  is returned.
+- Telegram progressive delivery, safe rich finals, EvidenceBundle synthesis, and
+  citation validation are implemented; a real search result is still required for
+  a live citation smoke.
 - The repository is under active Stage 0 cleanup and is not production-ready.
 
 ## License

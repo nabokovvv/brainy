@@ -233,11 +233,11 @@ spaCy/Wikidata/reranker/page utilities сохранены отдельным opt
 не импортируются fast path. Runtime оставляет один local chat path и Whisper.
 Forensic-аудит старых prompts/workflows закреплён в `LEGACY_QUALITY_AUDIT.md`:
 ценные механики доступны в Git и перенесены в Stage 2 как provider-neutral contracts.
-Явный `Web OFF/ON` intent реализован без запуска поиска: состояние сохраняется в
-`chat_data`, а route/language фиксируются при первом сообщении buffered request. Пока
-Stage 2 adapter отсутствует, Web snapshot отвечает локализованной unavailable-ошибкой
-и не подменяется local inference. Durable persistence между рестартами остаётся Stage
-4 задачей.
+Явный `Web OFF/ON` intent реализован с provider-neutral Web ON orchestration:
+состояние сохраняется в `chat_data`, а route/language фиксируются при первом сообщении
+buffered request. Search failure отвечает локализованной unavailable-ошибкой и не
+подменяется local inference. Durable persistence между рестартами остаётся Stage 4
+задачей.
 
 На target Mac mini подтверждены exact `gemma4:e2b`, key-based SSH и initial
 single-user 8K/32K/64K baseline без нового swap; результаты в
@@ -315,13 +315,10 @@ Recommended commits:
 - [x] Добавлен provider-neutral `SearchQuery`/`SearchResult`/`SearchProvider` contract
   с bounded limit, абсолютными HTTP(S)-URL и canonical URL без fragment tracking;
   backend и сетевой runtime остаются следующим slice.
-- [x] Подключён первый DuckDuckGo-compatible HTML adapter: injected/shared `httpx`
-  client (или lazy owned client), locale hint, bounded 512 KiB response, safe URL
-  admission, один retry только для transient transport/HTTP ошибок, TTL cache,
-  pacing и circuit breaker. Contract tests используют только `httpx.MockTransport`.
-- [x] Lifespan wiring shared `httpx` client и DuckDuckGo provider добавлен в runtime;
-  adapter пока намеренно не вызывается Telegram handler-ом.
-- Web ON answer orchestration остаётся следующим вертикальным slice.
+- [x] Добавлен pinned `ddgs` adapter с явным `backend="duckduckgo"`, async
+  thread offload, bounded timeout и mapping `title`/`href`/`body` в SearchResult.
+- [x] Web ON handler вызывает SearchGateway и GroundedSynthesizer; search failure
+  fail-closed возвращает локализованную unavailable-ошибку.
 - [x] Добавлен `SearchGateway -> EvidenceBundle -> GroundedSynthesizer`: стабильные
   evidence IDs, canonical URL dedupe, token budget и валидация citation IDs.
 - [x] `SearchGateway` принимает bounded `page_loader` и пакует возвращённые chunks
@@ -345,7 +342,7 @@ Recommended commits:
 
 ### Backends
 
-- Бесплатный DuckDuckGo-compatible HTTP/Python provider как первый best-effort backend.
+- Бесплатный `ddgs` provider с явным DuckDuckGo backend как единственный search path.
 - Yandex fallback только при гарантированном отсутствии списаний, с configurable folder id и без XML leakage за пределы adapter.
 - Любой provider с риском платного запроса выключен на уровне policy/config.
 

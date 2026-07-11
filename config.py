@@ -138,17 +138,17 @@ class Settings:
                 errors.append("WHISPER_CPP_FFMPEG must be non-empty")
 
         web_required = self.web_enabled_default if require_web is None else require_web
-        if self.search_backend not in {"disabled", "duckduckgo"}:
-            errors.append("SEARCH_BACKEND must be 'disabled' or 'duckduckgo'")
-        if self.search_fallback_backend not in {"disabled", "duckduckgo"}:
-            errors.append("SEARCH_FALLBACK_BACKEND must be 'disabled' or 'duckduckgo'")
+        if self.search_backend not in {"disabled", "ddgs"}:
+            errors.append("SEARCH_BACKEND must be 'disabled' or 'ddgs'")
+        if self.search_fallback_backend not in {"disabled", "ddgs"}:
+            errors.append("SEARCH_FALLBACK_BACKEND must be 'disabled' or 'ddgs'")
         if (
             self.search_fallback_backend == self.search_backend
             and self.search_backend != "disabled"
         ):
             errors.append("SEARCH_FALLBACK_BACKEND must differ from SEARCH_BACKEND")
-        if web_required and self.search_backend != "duckduckgo":
-            errors.append("Web search requires SEARCH_BACKEND=duckduckgo")
+        if web_required and self.search_backend != "ddgs":
+            errors.append("Web search requires SEARCH_BACKEND=ddgs")
 
         if errors:
             raise ConfigurationError("; ".join(errors))

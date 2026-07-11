@@ -79,10 +79,10 @@ response в документацию и логи.
 ### Дальнейшие шаги
 
 1. Создать защищённый runtime `.env` на Mac (не добавлять в Git) с существующим
-   `TELEGRAM_TOKEN`, `SEARCH_BACKEND=duckduckgo`, `WEB_ENABLED_DEFAULT=true` и
+   `TELEGRAM_TOKEN`, `SEARCH_BACKEND=ddgs`, `WEB_ENABLED_DEFAULT=true` и
    `TELEGRAM_RICH_MESSAGES=true`.
-2. Устранить/обойти подтверждённый DuckDuckGo 202 только через разрешённый
-   zero-cost provider adapter; не добавлять платный backend или скрытый fallback.
+2. Проверить `ddgs` с явным `backend="duckduckgo"`; не включать `auto`, DHT,
+   платный backend или скрытый fallback.
 3. После появления реальной выдачи запустить один нейтральный Telegram Web ON
    smoke, проверить canonical citation links и замерить search/synthesis/Telegram
    latency без сохранения текста пользователя или ответа.

@@ -122,10 +122,8 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "must differ"):
             settings.validate()
 
-    def test_duckduckgo_backend_enables_the_first_web_search_adapter(self) -> None:
-        settings = Settings.from_env(
-            {"SEARCH_BACKEND": "duckduckgo", "WEB_ENABLED_DEFAULT": "true"}
-        )
+    def test_ddgs_backend_enables_the_web_search_adapter(self) -> None:
+        settings = Settings.from_env({"SEARCH_BACKEND": "ddgs", "WEB_ENABLED_DEFAULT": "true"})
 
         settings.validate()
 
