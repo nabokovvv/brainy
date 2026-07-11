@@ -37,6 +37,9 @@ class PrivacyContractTests(unittest.TestCase):
         runtime = (ROOT / "bot.py").read_text(encoding="utf-8")
 
         self.assertTrue(research_modules.issubset(existing))
+        # Page fetching is now an explicit Web ON dependency; heavier enrichment
+        # utilities remain outside the fast runtime.
+        research_modules.remove("page_processor.py")
         self.assertFalse([module for module in research_modules if module[:-3] in runtime])
 
     def test_runtime_dependency_manifest_has_no_paid_provider_stack(self) -> None:

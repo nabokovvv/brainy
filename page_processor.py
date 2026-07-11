@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import config
 from brainy_core.web_safety import is_global_ip_address, is_safe_public_http_url
@@ -21,6 +21,31 @@ class TextChunk:
         self.text = text
         self.source_url = source_url
         self.index = index
+
+
+class PageFetcher:
+    """Lifespan-owned page loader for the Web ON evidence pipeline."""
+
+    def __init__(self, session) -> None:
+        self._session = session
+
+    async def load(self, urls):
+        return await fetch_and_process_pages(urls, session=self._session)
+
+
+def _canonical_page_url(url: str) -> str:
+    """Normalize a page URL before admission and fetching."""
+    parsed = urlparse(url)
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            (parsed.hostname or "").lower(),
+            parsed.path or "/",
+            "",
+            parsed.query,
+            "",
+        )
+    )
 
 
 def _get_aiohttp():
@@ -197,10 +222,16 @@ def chunk_text(text, source_url, max_chunk_words=150):
     return chunks
 
 
-async def fetch_and_process_pages(urls):
+async def fetch_and_process_pages(urls, session=None):
+    """Fetch bounded public pages, reusing an injected lifespan session."""
     aiohttp = _get_aiohttp()
-    async with aiohttp.ClientSession() as session:
-        unique_urls = list(dict.fromkeys(urls))[:MAX_PAGES_PER_REQUEST]
+    own_session = session is None
+    if own_session:
+        session = aiohttp.ClientSession()
+    try:
+        unique_urls = list(dict.fromkeys(_canonical_page_url(url) for url in urls))[
+            :MAX_PAGES_PER_REQUEST
+        ]
         tasks = [fetch_page(session, url) for url in unique_urls]
         html_contents = await asyncio.gather(*tasks)
 
@@ -213,3 +244,6 @@ async def fetch_and_process_pages(urls):
                     chunks = await asyncio.to_thread(chunk_text, clean_text, source_url=url)
                     all_chunks.extend(chunks)
         return all_chunks
+    finally:
+        if own_session:
+            await session.close()

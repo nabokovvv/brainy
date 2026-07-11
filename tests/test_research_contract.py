@@ -5,6 +5,7 @@ from pathlib import Path
 
 from brainy_core.web_safety import is_safe_public_http_url
 from brainy_core.search import SearchQuery, SearchResult
+from page_processor import _canonical_page_url, chunk_text
 from wikidata_mapper import _escape_sparql_literal, _get_p31_for_qid, get_qid_from_entity
 
 
@@ -75,6 +76,19 @@ class ResearchContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse([item for item in forbidden if item in source])
         self.assertFalse([item for item in required if item not in source])
+
+    def test_page_urls_are_canonicalized_before_dedupe(self) -> None:
+        self.assertEqual(
+            _canonical_page_url("HTTPS://Example.COM/story/#tracking"),
+            "https://example.com/story/",
+        )
+
+    def test_chunking_preserves_multilingual_sentence_boundaries(self) -> None:
+        chunks = chunk_text(
+            "Первое предложение. Второе предложение! ثالثة جملة؟", "https://example.com"
+        )
+        self.assertEqual(len(chunks), 1)
+        self.assertIn("ثالثة جملة", chunks[0].text)
 
     def test_sparql_literal_escaping_removes_control_characters(self) -> None:
         escaped = _escape_sparql_literal('name" }\nSERVICE <https://example.com>')

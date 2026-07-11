@@ -42,6 +42,7 @@ from brainy_core.providers import DuckDuckGoProvider, OllamaProvider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
+from page_processor import PageFetcher
 from telegram_renderer import RichMessageRenderer, sanitize_untrusted_markdown
 from utils import strip_think
 
@@ -1275,12 +1276,24 @@ async def main_async() -> None:
     # start network traffic during import or Telegram startup.
     search_client: httpx.AsyncClient | None = None
     search_provider: DuckDuckGoProvider | None = None
+    page_client = None
+    page_fetcher = None
     if config.SETTINGS.search_backend == "duckduckgo":
         search_client = httpx.AsyncClient(
             headers={"User-Agent": config.CUSTOM_USER_AGENT},
             follow_redirects=False,
         )
         search_provider = DuckDuckGoProvider(client=search_client)
+        try:
+            import aiohttp
+
+            page_client = aiohttp.ClientSession(
+                headers={"User-Agent": config.CUSTOM_USER_AGENT},
+                raise_for_status=False,
+            )
+            page_fetcher = PageFetcher(page_client)
+        except ImportError:
+            logger.warning("Research extra unavailable; Web ON will use search snippets only")
 
     application = (
         Application.builder()
@@ -1300,7 +1313,9 @@ async def main_async() -> None:
     application.bot_data["inference_provider"] = inference_provider
     application.bot_data["search_provider"] = search_provider
     application.bot_data["search_gateway"] = (
-        SearchGateway(search_provider) if search_provider is not None else None
+        SearchGateway(search_provider, page_loader=page_fetcher.load if page_fetcher else None)
+        if search_provider is not None
+        else None
     )
     application.bot_data["grounded_synthesizer"] = (
         GroundedSynthesizer(inference_provider) if search_provider is not None else None
@@ -1364,6 +1379,8 @@ async def main_async() -> None:
             await _best_effort_cleanup("search_provider.close", search_provider.aclose)
         if search_client is not None:
             await _best_effort_cleanup("search_client.close", search_client.aclose)
+        if page_client is not None:
+            await _best_effort_cleanup("page_client.close", page_client.close)
         if application_initialized:
             await _best_effort_cleanup("application.shutdown", application.shutdown)
         logger.info("Bot has been shut down.")

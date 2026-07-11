@@ -324,7 +324,13 @@ Recommended commits:
 - Web ON answer orchestration остаётся следующим вертикальным slice.
 - [x] Добавлен `SearchGateway -> EvidenceBundle -> GroundedSynthesizer`: стабильные
   evidence IDs, canonical URL dedupe, token budget и валидация citation IDs.
+- [x] `SearchGateway` принимает bounded `page_loader` и пакует возвращённые chunks
+  как evidence с provenance `page_chunk` и trust `page_content`; transport остаётся
+  инъецируемым и не смешивается с gateway.
 - URL canonicalization/dedup до загрузки страниц.
+- [x] Безопасный page fetcher принимает shared lifespan session, canonicalizes URL до
+  dedupe, ограничивает число страниц/размер ответа/content types и сохраняет SSRF
+  admission checks; offline tests покрывают canonical URL и multilingual chunking.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
 - Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.
 

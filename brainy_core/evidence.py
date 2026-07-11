@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import Awaitable, Callable, Sequence
 
 from brainy_core.inference import ChatMessage, ChatRequest, InferenceProvider
 from brainy_core.search import SearchProvider, SearchQuery
@@ -50,11 +51,18 @@ class GroundedAnswer:
 class SearchGateway:
     """Search, normalize, deduplicate, and pack results deterministically."""
 
-    def __init__(self, provider: SearchProvider, *, token_budget: int = 1200) -> None:
+    def __init__(
+        self,
+        provider: SearchProvider,
+        *,
+        token_budget: int = 1200,
+        page_loader: Callable[[Sequence[str]], Awaitable[Sequence[object]]] | None = None,
+    ) -> None:
         if token_budget < 40:
             raise ValueError("token_budget must be at least 40")
         self._provider = provider
         self._token_budget = token_budget
+        self._page_loader = page_loader
 
     async def build_bundle(self, request: SearchQuery) -> EvidenceBundle:
         results = await self._provider.search(request)
@@ -77,6 +85,29 @@ class SearchGateway:
                 Evidence(f"E{len(items) + 1}-{digest}", text, url, result.provider, result.rank)
             )
             seen_urls.add(url)
+        if self._page_loader is not None and seen_urls:
+            chunks = await self._page_loader(tuple(sorted(seen_urls)))
+            for index, chunk in enumerate(chunks):
+                url = getattr(chunk, "source_url", "")
+                text = " ".join(str(getattr(chunk, "text", "")).split())
+                if (
+                    not url
+                    or not text
+                    or _estimate_tokens(text) + sum(_estimate_tokens(item.text) for item in items)
+                    > self._token_budget
+                ):
+                    continue
+                digest = hashlib.sha256(f"{url}\n{text}".encode()).hexdigest()[:12]
+                items.append(
+                    Evidence(
+                        f"E{len(items) + 1}-{digest}",
+                        text,
+                        url,
+                        "page_chunk",
+                        len(items) + index + 1,
+                        "page_content",
+                    )
+                )
         return EvidenceBundle(tuple(items), self._token_budget)
 
 
