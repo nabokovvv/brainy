@@ -58,3 +58,33 @@ review, сама модель не копируется в репозитори�
 Повторная проверка 2026-07-11 через non-login SSH shell подтвердила, что
 абсолютные пути работают независимо от PATH: ffmpeg и whisper-cli успешно
 обработали существующий локальный audio fixture с large-v3 примерно за 6 секунд.
+
+## Web ON: состояние remote smoke
+
+Проверка 2026-07-11 выполнялась из отдельного `~/Brainy-runtime`, развёрнутого
+из локального checkout `ec735b1` без Git-метаданных, `.env` и кэшей. Не трогать
+CI checkout в `~/actions-runner/_work/brainy/brainy`: он находится на старом
+commit `3cf255f` и не содержит Web ON evidence modules.
+
+Ollama loopback API на target готов. Однако живой Telegram runtime на target не
+найден: в runtime-каталоге отсутствует `.env`, поэтому нельзя запускать Bot API
+smoke или отправлять реальные сообщения без явного provisioning token.
+
+Реальный DuckDuckGo smoke с нейтральным публичным запросом получил HTTP 202 и
+anti-bot challenge. Текущий adapter вернул пустую выдачу; Web ON обработчик
+должен fail closed с `web_unavailable`, но grounded synthesis и rendering
+citations при этой выдаче не запускаются. Не записывать query, SERP или model
+response в документацию и логи.
+
+### Дальнейшие шаги
+
+1. Создать защищённый runtime `.env` на Mac (не добавлять в Git) с существующим
+   `TELEGRAM_TOKEN`, `SEARCH_BACKEND=duckduckgo`, `WEB_ENABLED_DEFAULT=true` и
+   `TELEGRAM_RICH_MESSAGES=true`.
+2. Устранить/обойти подтверждённый DuckDuckGo 202 только через разрешённый
+   zero-cost provider adapter; не добавлять платный backend или скрытый fallback.
+3. После появления реальной выдачи запустить один нейтральный Telegram Web ON
+   smoke, проверить canonical citation links и замерить search/synthesis/Telegram
+   latency без сохранения текста пользователя или ответа.
+4. Отдельно повторить smoke при недоступном search backend и подтвердить
+   локализованный `web_unavailable` без local fallback.
