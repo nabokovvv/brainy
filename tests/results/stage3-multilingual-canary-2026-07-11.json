@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-11",
+  "target": "Mac mini M4 16 GB",
+  "languages": ["de", "en", "es", "fr", "id", "pt", "ru", "tr"],
+  "stores_response_text": false,
+  "active_models": [],
+  "providers": {
+    "openrouter": {
+      "daily_counter_after_run": 40,
+      "daily_limit": 50,
+      "models": [
+        {
+          "model_id": "google/gemma-4-26b-a4b-it:free",
+          "lifecycle": "quarantine",
+          "passed_languages": [],
+          "median_latency_ms": 0.0,
+          "note": "No valid completion in the recorded repeat batch."
+        },
+        {
+          "model_id": "google/gemma-4-31b-it:free",
+          "lifecycle": "quarantine",
+          "passed_languages": ["en"],
+          "median_latency_ms": 2603.7,
+          "note": "Only one of eight language checks passed."
+        },
+        {
+          "model_id": "openai/gpt-oss-20b:free",
+          "lifecycle": "quarantine",
+          "passed_languages": [],
+          "completed_languages": [],
+          "error_languages": ["de", "en", "es", "fr", "id", "pt", "ru", "tr"]
+        }
+      ]
+    },
+    "nvidia": {
+      "daily_counter_after_run": 24,
+      "daily_limit": 40,
+      "models": [
+        {
+          "model_id": "google/gemma-4-31b-it",
+          "lifecycle": "quarantine",
+          "passed_languages": [],
+          "completed_languages": [],
+          "error_languages": ["de", "en", "es", "fr", "id", "pt", "ru", "tr"]
+        },
+        {
+          "model_id": "qwen/qwen3-next-80b-a3b-instruct",
+          "lifecycle": "quarantine",
+          "passed_languages": ["tr"],
+          "completed_languages": ["tr"],
+          "error_languages": ["de", "en", "es", "fr", "id", "pt", "ru"],
+          "median_latency_ms": 29657.9
+        },
+        {
+          "model_id": "google/gemma-3-12b-it",
+          "lifecycle": "quarantine",
+          "passed_languages": [],
+          "completed_languages": [],
+          "error_languages": ["de", "en", "es", "fr", "id", "pt", "ru", "tr"]
+        }
+      ]
+    }
+  }
+}

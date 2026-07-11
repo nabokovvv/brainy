@@ -7,7 +7,8 @@ product direction is one chat with an explicit `Web OFF/ON` switch:
 - `Web ON` uses the configured zero-cost provider rotation and returns verifiable
   sources when at least one provider has usable quota and responds successfully.
 
-The project is at the **Stage 0 / early Stage 1 checkpoint**. The runtime now exposes
+The project has completed the local/Web foundations and the first **Stage 3 remote
+catalog canary**. The runtime exposes
 one chat with an explicit `Web OFF/ON` route switch; the old Deep/Web modes and their
 provider stack have been removed. The spaCy/reranker/page/Wikidata research utilities
 are preserved as a dormant optional extra for Stage 2. Web ON rotates configured
@@ -122,6 +123,23 @@ installed separately (e.g. via Homebrew) and are not managed by `uv sync`;
 
 Never commit `.env`, tokens, API keys, or real user data.
 
+### Remote multilingual catalog
+
+Stage 3 includes free-only OpenRouter catalog discovery and curated NVIDIA/OpenRouter
+canaries. Discovery does not spend inference quota:
+
+```bash
+uv run python -m tools.scan_remote_models --provider openrouter
+uv run python -m tools.scan_remote_models --provider nvidia
+```
+
+Live canary requires an explicit `--model` plus `OPENROUTER_API_KEY` or
+`NVIDIA_API_KEY`. It tests all eight product languages and emits only lifecycle,
+language codes, safe error codes, counters, and latency—never prompts or answers.
+The first Mac mini run left every candidate quarantined, so the Telegram runtime has
+no remote active set and remains local-first. See
+[the Stage 3 decision and results](docs/STAGE3_MULTILINGUAL_CATALOG.md).
+
 ### 3. Run the bot
 
 With Ollama App running and the exact model tag configured:
@@ -153,14 +171,15 @@ providers.
 
 ## Current limitations
 
-- The route switch is session-persistent and captured with each buffered request;
-  durable persistence across bot restarts is not implemented yet.
+- The route switch is durable across restarts and captured with each buffered request.
 - Search providers are best-effort and can still fail or report exhausted quotas;
   provider errors rotate to the remaining configured providers, while all-provider
   failure disables Web ON until the next UTC calendar month.
 - Telegram progressive delivery, safe rich finals, EvidenceBundle synthesis, and
   citation validation are implemented; a real search result is still required for
   a live citation smoke.
+- Remote catalog candidates are not production fallbacks until one passes all eight
+  multilingual canaries and is explicitly curated.
 - The repository is under active Stage 0 cleanup and is not production-ready.
 
 ## License

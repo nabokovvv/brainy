@@ -413,30 +413,39 @@ Gate:
 
 ### NVIDIA adapter
 
-- Base URL `https://integrate.api.nvidia.com/v1`, общий OpenAI-compatible contract.
-- Curated allowlist, shared client, streaming, concurrency 1 по умолчанию (максимум 2 после измерений).
-- Retry `429/502/503/504` и connect timeout с full jitter/`Retry-After`; auth/validation errors не retry.
-- Локальные RPM/daily budgets и метрики, потому что стабильный machine-readable remaining-credit endpoint не подтверждён.
+- [x] Base URL `https://integrate.api.nvidia.com/v1`, общий OpenAI-compatible contract.
+- [x] Curated allowlist, shared client, streaming, concurrency 1 по умолчанию
+  (максимум 2 разрешён adapter contract, но production остаётся 1 до измерений).
+- [x] Retry `429/502/503/504` и connect timeout с full jitter/`Retry-After`;
+  auth/validation errors не retry.
+- [x] Локальные RPM/daily budgets и безопасные canary metrics, потому что стабильный
+  machine-readable remaining-credit endpoint не подтверждён.
 
 ### OpenRouter catalog/scanner
 
-- `GET /api/v1/models`, shortlist details и persistent last-known-good snapshot.
-- TTL 15 минут, stale-if-error 24 часа, single-flight refresh с jitter.
-- Eligibility по `:free`, price/capability/context/output/expiration policy.
-- Canary проверяет короткую мультиязычную выборку, latency и заявленные JSON/tools capabilities.
-- Active set — 2–3 curated models; `openrouter/free` — последний fallback.
-- Учитывать free limits и вести собственный UTC daily counter.
+- [x] `GET /api/v1/models`, shortlist details и persistent last-known-good snapshot.
+- [x] TTL 15 минут, stale-if-error 24 часа и single-flight refresh с jitter.
+- [x] Eligibility по `:free`, price/capability/context/output/expiration policy.
+- [x] Canary проверяет короткую выборку всех 8 языков Brainy и latency, не сохраняя
+  тексты ответов.
+- [ ] Проверить заявленные JSON/tools capabilities после появления прошедшего
+  мультиязычного кандидата; не расходовать quota на уже quarantined модели.
+- [x] Active set ограничен 2–3 curated models; после первого canary он пуст.
+  `openrouter/free` зарезервирован как последний fallback и не включён автоматически.
+- [x] Free limits учитываются собственным UTC daily counter; corrupt state fail-closes.
 - Apriel Thinker 15B сохраняется в статусе `discovered`: владелец отметил качество
   английского текста; multilingual eval и доказанная цена endpoint `0` обязательны
   до `eligible/canary/active`.
 
 Gate:
 
-- schema drift или пустой catalog не уничтожает LKG;
-- новая модель не становится active без canary/eval;
-- 429/quota exhaustion не создаёт retry storm;
-- route закреплён на запрос; fallback chain имеет общий time budget;
-- provider/model latency, errors, usage и quarantine видимы в admin diagnostics.
+- [x] schema drift или пустой catalog не уничтожает LKG;
+- [x] новая модель не становится active без canary/eval;
+- [x] 429/quota exhaustion не создаёт retry storm;
+- [x] remote adapter закрепляет model на запрос и имеет общий request deadline;
+- [ ] подключить fallback chain к runtime только после появления active model;
+- [x] provider/model latency, safe error codes, usage и quarantine доступны в
+  canary diagnostics. Первый результат и ADR: `docs/STAGE3_MULTILINGUAL_CATALOG.md`.
 
 ## Stage 4 — Closed beta hardening
 
