@@ -4,6 +4,7 @@ from brainy_core.inference import (
     ChatMessage,
     ChatRequest,
     ChatResult,
+    ChatStreamEvent,
     InferenceProvider,
     ProviderError,
     ProviderErrorCode,
@@ -14,6 +15,7 @@ from brainy_core.inference import (
     ProviderResponseError,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    StreamingInferenceProvider,
 )
 from brainy_core.routing import RouteIntent
 from brainy_core.use_cases import build_fast_chat_request
@@ -22,6 +24,7 @@ __all__ = [
     "ChatMessage",
     "ChatRequest",
     "ChatResult",
+    "ChatStreamEvent",
     "InferenceProvider",
     "ProviderError",
     "ProviderErrorCode",
@@ -32,6 +35,7 @@ __all__ = [
     "ProviderResponseError",
     "ProviderTimeoutError",
     "ProviderUnavailableError",
+    "StreamingInferenceProvider",
     "RouteIntent",
     "build_fast_chat_request",
 ]

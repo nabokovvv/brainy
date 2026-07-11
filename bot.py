@@ -43,6 +43,8 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 _draft_ids = itertools.count(1)
+_DRAFT_UPDATE_INTERVAL_SECONDS = 0.35
+_DRAFT_TEXT_LIMIT = 4096
 
 # ---------------------------------------------------------------------------#
 #                           Language Detection                               #
@@ -360,21 +362,71 @@ async def send_typing_periodically(bot, chat_id):
         pass  # Task was cancelled, expected behavior
 
 
-async def _send_progress_draft(bot, chat_id: int) -> bool:
-    """Show Telegram's ephemeral animated Thinking draft when supported."""
+async def _send_progress_draft(
+    bot,
+    chat_id: int,
+    *,
+    draft_id: int | None = None,
+    text: str = "",
+) -> int | None:
+    """Publish one ephemeral draft revision when Telegram supports it."""
 
     send_draft = getattr(bot, "send_message_draft", None)
     if send_draft is None:
-        return False
+        return None
+    active_draft_id = draft_id or next(_draft_ids)
     try:
         await asyncio.wait_for(
-            send_draft(chat_id=chat_id, draft_id=next(_draft_ids), text=""),
+            send_draft(chat_id=chat_id, draft_id=active_draft_id, text=text),
             timeout=2,
         )
-        return True
+        return active_draft_id
     except (TimeoutError, telegram.error.TelegramError):
         logger.info("Telegram message draft unavailable; using typing fallback")
-        return False
+        return None
+
+
+def _queue_latest_draft(updates: asyncio.Queue[str], text: str) -> None:
+    """Keep only the newest preview so Telegram cannot backpressure inference."""
+
+    if updates.full():
+        try:
+            updates.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+    updates.put_nowait(text)
+
+
+async def _publish_draft_updates(
+    bot,
+    chat_id: int,
+    draft_id: int,
+    updates: asyncio.Queue[str],
+) -> None:
+    """Publish latest-wins plain-text previews at a bounded rate."""
+
+    if await _send_progress_draft(bot, chat_id, draft_id=draft_id) is None:
+        return
+    loop = asyncio.get_running_loop()
+    next_update_at = loop.time()
+    while True:
+        preview = await updates.get()
+        while not updates.empty():
+            preview = updates.get_nowait()
+        delay = next_update_at - loop.time()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        if (
+            await _send_progress_draft(
+                bot,
+                chat_id,
+                draft_id=draft_id,
+                text=preview[:_DRAFT_TEXT_LIMIT],
+            )
+            is None
+        ):
+            return
+        next_update_at = loop.time() + _DRAFT_UPDATE_INTERVAL_SECONDS
 
 
 def _clean_text_for_plain_send(text: str) -> str:
@@ -471,13 +523,38 @@ async def fast_reply_handler(
     llm_semaphore = context.application.bot_data["llm_semaphore"]
 
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    draft_task = asyncio.create_task(_send_progress_draft(context.bot, update.effective_chat.id))
+    draft_id = next(_draft_ids)
+    draft_updates: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+    draft_task = asyncio.create_task(
+        _publish_draft_updates(
+            context.bot,
+            update.effective_chat.id,
+            draft_id,
+            draft_updates,
+        )
+    )
     try:
         provider = context.application.bot_data.get("inference_provider")
         if provider is None:
             raise RuntimeError("Inference provider is not configured")
         async with llm_semaphore:
-            result = await provider.chat(build_fast_chat_request(query, lang))
+            request = build_fast_chat_request(query, lang)
+            stream_chat = getattr(provider, "stream_chat", None)
+            if callable(stream_chat):
+                result = None
+                streamed_text = ""
+                async for event in stream_chat(request):
+                    if event.delta:
+                        streamed_text += event.delta
+                        visible_preview = strip_think(streamed_text)
+                        if visible_preview:
+                            _queue_latest_draft(draft_updates, visible_preview)
+                    elif event.result is not None:
+                        result = event.result
+                if result is None:
+                    raise RuntimeError("Inference stream ended without a final result")
+            else:
+                result = await provider.chat(request)
             final_answer = result.text
             logger.info(
                 "Fast reply completed provider=%s model=%s latency_ms=%.1f",

@@ -103,6 +103,58 @@ class OllamaProviderTests(unittest.IsolatedAsyncioTestCase):
         await provider.aclose()
         self.assertFalse(client.is_closed, "The provider must not close a borrowed shared client.")
 
+    async def test_stream_chat_yields_deltas_and_normalized_final_result(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=(
+                    b'data: {"model":"gemma-test:latest","choices":[{"delta":{"role":"assistant"}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"content":"Fast "}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"content":"answer."},"finish_reason":"stop"}],'
+                    b'"usage":{"prompt_tokens":11,"completion_tokens":3}}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
+                request=request,
+            )
+
+        provider, _ = self.make_provider(handler)
+
+        events = [event async for event in provider.stream_chat(_request_with_private_text())]
+
+        self.assertEqual([event.delta for event in events[:-1]], ["Fast ", "answer."])
+        self.assertIsNotNone(events[-1].result)
+        result = events[-1].result
+        assert result is not None
+        self.assertEqual(result.text, "Fast answer.")
+        self.assertEqual(result.finish_reason, "stop")
+        self.assertEqual(result.input_tokens, 11)
+        self.assertEqual(result.output_tokens, 3)
+        sent = json.loads(requests[0].content)
+        self.assertTrue(sent["stream"])
+        self.assertEqual(sent["stream_options"], {"include_usage": True})
+        self.assertEqual(sent["reasoning_effort"], "none")
+
+    async def test_stream_response_is_capped_before_an_unterminated_line_is_decoded(self) -> None:
+        class OversizedStream(httpx.AsyncByteStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                yield b'data: {"choices":[{"delta":{"content":"'
+                yield b"x" * 64
+
+            async def aclose(self) -> None:
+                return None
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=OversizedStream(), request=request)
+
+        provider, _ = self.make_provider(handler, max_response_bytes=48)
+
+        with self.assertRaises(ProviderResponseError):
+            _ = [event async for event in provider.stream_chat(_request_with_private_text())]
+
     async def test_timeout_has_safe_typed_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ReadTimeout("transport details", request=request)

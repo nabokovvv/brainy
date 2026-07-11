@@ -235,7 +235,10 @@ Full-context retention smoke прошёл на фактических
   точный Ollama tag на Mac.
 - [x] Поддержать динамический context ceiling до 64K; выполнить initial 8K/32K/64K
   allocation benchmark. Full-context quality/memory validation остаётся open.
-- Реализовать Telegram progressive delivery через Bot API 10.1 Rich Messages/streaming с fallback на обычные entities/HTML.
+- [x] Реализовать Telegram progressive delivery: provider-neutral token stream обновляет
+  `sendMessageDraft` с bounded latest-wins throttling; финальный ответ всегда отправляется
+  обычным persistent message, а providers без streaming используют прежний `chat()` path.
+- Реализовать финальный Rich Messages render с fallback на обычные entities/HTML.
 - Использовать expandable quotes, structured citations, code/math formatting и уместные бесплатные message effects; не использовать paid broadcasts/Stars.
 - Убрать spaCy, Wikidata, chart generator и тяжёлый reranker из fast path; Whisper сохраняется как поддерживаемый voice path.
 - Зафиксировать точный установленный tag Gemma на Mac и использовать его как первый local benchmark candidate.
@@ -244,8 +247,9 @@ Full-context retention smoke прошёл на фактических
 Checkpoint UX: Bot API 10.0+ `sendMessageDraft` подключён через PTB 22.8 как
 неблокирующий fail-soft animated Thinking preview; typing остаётся fallback. Это
 основа для Rich Messages Bot API 10.1. Local-ответы получили numeric latency badge.
-Настоящий token streaming, Rich Message final render и feedback button остаются
-следующими slices.
+Настоящий Ollama token streaming подключён к тому же draft ID; медленные Telegram
+обновления вынесены из inference loop и не создают backpressure. Rich Message final
+render и feedback button остаются следующими slices.
 
 Gate:
 

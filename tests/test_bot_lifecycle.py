@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from brainy_core import RouteIntent
+from brainy_core import ChatResult, ChatStreamEvent, ProviderModel, RouteIntent
 from brainy_core.scheduling import StablePriorityQueue
 
 
@@ -133,6 +133,39 @@ class _Bot:
         self.drafts.append(kwargs)
         return True
 
+    async def send_chat_action(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+class _StreamingProvider:
+    def __init__(self) -> None:
+        self.chat_called = False
+
+    async def chat(self, request: object) -> ChatResult:
+        self.chat_called = True
+        raise AssertionError("Streaming providers must not run a duplicate generation")
+
+    async def stream_chat(self, request: object):
+        yield ChatStreamEvent(delta="Fast ")
+        await asyncio.sleep(0)
+        yield ChatStreamEvent(delta="answer.")
+        yield ChatStreamEvent(
+            result=ChatResult(
+                text="Fast answer.",
+                model=ProviderModel(provider="fake", name="model", is_local=True),
+                latency_ms=420,
+            )
+        )
+
+
+class _NonStreamingProvider:
+    async def chat(self, request: object) -> ChatResult:
+        return ChatResult(
+            text="Fallback answer.",
+            model=ProviderModel(provider="fake", name="model", is_local=True),
+            latency_ms=500,
+        )
+
 
 class _FailingTranscriber:
     async def transcribe(self, path: str, *, language: str) -> str:
@@ -185,6 +218,78 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_progress_draft_is_optional_for_old_wrappers(self) -> None:
         self.assertFalse(await bot._send_progress_draft(object(), 42))
+
+    async def test_draft_publisher_keeps_latest_preview_and_reuses_id(self) -> None:
+        telegram_bot = _Bot()
+        updates: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+        bot._queue_latest_draft(updates, "old")
+        bot._queue_latest_draft(updates, "new")
+        task = asyncio.create_task(bot._publish_draft_updates(telegram_bot, 42, 77, updates))
+
+        for _ in range(10):
+            if len(telegram_bot.drafts) >= 2:
+                break
+            await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+        self.assertEqual([draft["draft_id"] for draft in telegram_bot.drafts], [77, 77])
+        self.assertEqual(telegram_bot.drafts[-1]["text"], "new")
+
+    async def test_fast_reply_streams_when_supported_and_sends_final_answer(self) -> None:
+        telegram_bot = _Bot()
+        provider = _StreamingProvider()
+        message = _Message()
+        update = SimpleNamespace(effective_chat=SimpleNamespace(id=42), message=message)
+        context = SimpleNamespace(
+            bot=telegram_bot,
+            chat_data={"language": "en"},
+            application=SimpleNamespace(
+                bot_data={
+                    "translator": _Translator(),
+                    "llm_semaphore": asyncio.Semaphore(1),
+                    "inference_provider": provider,
+                }
+            ),
+        )
+        final_messages: list[tuple[str, object]] = []
+
+        async def capture_final(update_arg, text: str, **kwargs: object) -> None:
+            final_messages.append((text, kwargs.get("parse_mode")))
+
+        with patch.object(bot, "send_long_message", capture_final):
+            await bot.fast_reply_handler(update, context, "question")
+
+        self.assertFalse(provider.chat_called)
+        self.assertEqual(len(final_messages), 1)
+        self.assertIn("Fast answer", final_messages[0][0])
+        self.assertIn("⚡ 0\\.4s", final_messages[0][0])
+
+    async def test_fast_reply_falls_back_for_non_streaming_provider(self) -> None:
+        telegram_bot = _Bot()
+        message = _Message()
+        update = SimpleNamespace(effective_chat=SimpleNamespace(id=42), message=message)
+        context = SimpleNamespace(
+            bot=telegram_bot,
+            chat_data={"language": "en"},
+            application=SimpleNamespace(
+                bot_data={
+                    "translator": _Translator(),
+                    "llm_semaphore": asyncio.Semaphore(1),
+                    "inference_provider": _NonStreamingProvider(),
+                }
+            ),
+        )
+        final_messages: list[str] = []
+
+        async def capture_final(update_arg, text: str, **kwargs: object) -> None:
+            final_messages.append(text)
+
+        with patch.object(bot, "send_long_message", capture_final):
+            await bot.fast_reply_handler(update, context, "question")
+
+        self.assertEqual(len(final_messages), 1)
+        self.assertIn("Fallback answer", final_messages[0])
 
     async def test_cancelling_idle_worker_does_not_over_acknowledge_queue(self) -> None:
         queue: StablePriorityQueue[object] = StablePriorityQueue(maxsize=1)

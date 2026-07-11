@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Optional, Protocol, Tuple, runtime_checkable
+from typing import AsyncIterator, Literal, Optional, Protocol, Tuple, runtime_checkable
 
 MessageRole = Literal["system", "user", "assistant"]
 
@@ -112,6 +112,20 @@ class ChatResult:
 
 
 @dataclass(frozen=True)
+class ChatStreamEvent:
+    """One visible delta or the normalized final result of a streamed chat."""
+
+    delta: str = ""
+    result: Optional[ChatResult] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.delta, str):
+            raise TypeError("delta must be text.")
+        if bool(self.delta) == (self.result is not None):
+            raise ValueError("A stream event must contain either a delta or a final result.")
+
+
+@dataclass(frozen=True)
 class ProviderHealth:
     """Readiness of the provider and its configured model."""
 
@@ -173,3 +187,10 @@ class InferenceProvider(Protocol):
     async def health(self) -> ProviderHealth: ...
 
     async def aclose(self) -> None: ...
+
+
+@runtime_checkable
+class StreamingInferenceProvider(InferenceProvider, Protocol):
+    """Optional provider capability for progressive delivery."""
+
+    def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]: ...

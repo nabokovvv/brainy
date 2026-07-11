@@ -6,7 +6,7 @@ import asyncio
 import ipaddress
 import json as json_module
 import time
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -14,6 +14,7 @@ import httpx
 from brainy_core.inference import (
     ChatRequest,
     ChatResult,
+    ChatStreamEvent,
     ProviderError,
     ProviderErrorCode,
     ProviderHealth,
@@ -127,6 +128,88 @@ class OllamaProvider:
         if result is None:  # Defensive: _chat_operation either returns or raises.
             raise ProviderResponseError(_PROVIDER_NAME)
         return result
+
+    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        """Stream visible text deltas followed by one normalized final result."""
+
+        try:
+            async with asyncio.timeout(self._timeout_seconds):
+                async for event in self._stream_chat_operation(request):
+                    yield event
+        except TimeoutError:
+            raise ProviderTimeoutError(_PROVIDER_NAME) from None
+        except httpx.TimeoutException:
+            raise ProviderTimeoutError(_PROVIDER_NAME) from None
+        except httpx.RequestError:
+            raise ProviderUnavailableError(_PROVIDER_NAME) from None
+
+    async def _stream_chat_operation(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        payload: Dict[str, Any] = {
+            "model": self._model.name,
+            "messages": [
+                {"role": message.role, "content": message.content} for message in request.messages
+            ],
+            "max_tokens": request.max_output_tokens,
+            "temperature": request.temperature,
+            "reasoning_effort": "none",
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        started = time.monotonic()
+        text_parts: list[str] = []
+        finish_reason: Optional[str] = None
+        input_tokens: Optional[int] = None
+        output_tokens: Optional[int] = None
+        response_model = self._model.name
+
+        async with self._semaphore:
+            client = self._get_client()
+            async with client.stream(
+                "POST",
+                f"{self._base_url}/chat/completions",
+                json=payload,
+                timeout=self._timeout,
+                follow_redirects=False,
+            ) as response:
+                _raise_for_status(response.status_code)
+                async for line in _iter_bounded_lines(response, self._max_response_bytes):
+                    if not line or line.startswith(":"):
+                        continue
+                    if not line.startswith("data:"):
+                        raise ProviderResponseError(_PROVIDER_NAME, response.status_code)
+                    data_text = line[5:].strip()
+                    if data_text == "[DONE]":
+                        break
+                    data = _response_json(data_text.encode("utf-8"))
+                    delta, chunk_finish, chunk_model, usage = _parse_stream_chunk(data)
+                    if chunk_model is not None:
+                        response_model = chunk_model
+                    if chunk_finish is not None:
+                        finish_reason = chunk_finish
+                    if usage is not None:
+                        input_tokens, output_tokens = usage
+                    if delta:
+                        text_parts.append(delta)
+                        yield ChatStreamEvent(delta=delta)
+
+        text = "".join(text_parts).strip()
+        if not text:
+            raise ProviderResponseError(_PROVIDER_NAME)
+        yield ChatStreamEvent(
+            result=ChatResult(
+                text=text,
+                model=ProviderModel(
+                    provider=self._model.provider,
+                    name=response_model,
+                    is_local=self._model.is_local,
+                    context_window=self._model.context_window,
+                ),
+                latency_ms=(time.monotonic() - started) * 1000,
+                finish_reason=finish_reason,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        )
 
     async def _chat_operation(self, request: ChatRequest) -> ChatResult:
         payload: Dict[str, Any] = {
@@ -300,6 +383,42 @@ async def _read_bounded(response: httpx.Response, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+async def _iter_bounded_lines(response: httpx.Response, limit: int) -> AsyncIterator[str]:
+    """Decode lines only after the raw streamed body has passed its byte cap."""
+
+    declared_length = response.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            parsed_length = int(declared_length)
+        except ValueError:
+            raise ProviderResponseError(_PROVIDER_NAME, response.status_code) from None
+        if parsed_length < 0 or parsed_length > limit:
+            raise ProviderResponseError(_PROVIDER_NAME, response.status_code)
+
+    buffer = bytearray()
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > limit:
+            raise ProviderResponseError(_PROVIDER_NAME, response.status_code)
+        buffer.extend(chunk)
+        while True:
+            newline = buffer.find(b"\n")
+            if newline < 0:
+                break
+            raw_line = bytes(buffer[:newline]).removesuffix(b"\r")
+            del buffer[: newline + 1]
+            try:
+                yield raw_line.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ProviderResponseError(_PROVIDER_NAME, response.status_code) from None
+    if buffer:
+        try:
+            yield bytes(buffer).removesuffix(b"\r").decode("utf-8")
+        except UnicodeDecodeError:
+            raise ProviderResponseError(_PROVIDER_NAME, response.status_code) from None
+
+
 def _response_json(content: bytes) -> Mapping[str, Any]:
     invalid_json = False
     try:
@@ -372,6 +491,39 @@ def _parse_usage(usage: object) -> Tuple[Optional[int], Optional[int]]:
         _optional_non_negative_int(usage.get("prompt_tokens")),
         _optional_non_negative_int(usage.get("completion_tokens")),
     )
+
+
+def _parse_stream_chunk(
+    data: Mapping[str, Any],
+) -> tuple[str, Optional[str], Optional[str], Optional[Tuple[Optional[int], Optional[int]]]]:
+    try:
+        choices = data.get("choices", [])
+        if not isinstance(choices, list):
+            raise TypeError
+        delta = ""
+        finish_reason = None
+        if choices:
+            choice = choices[0]
+            if not isinstance(choice, Mapping):
+                raise TypeError
+            delta_payload = choice.get("delta", {})
+            if not isinstance(delta_payload, Mapping):
+                raise TypeError
+            delta = delta_payload.get("content") or ""
+            if not isinstance(delta, str):
+                raise TypeError
+            finish_reason = choice.get("finish_reason")
+            if finish_reason is not None and not isinstance(finish_reason, str):
+                raise TypeError
+
+        model = data.get("model")
+        if model is not None and (not isinstance(model, str) or not model.strip()):
+            raise TypeError
+        usage_payload = data.get("usage")
+        usage = None if usage_payload is None else _parse_usage(usage_payload)
+    except (TypeError, ValueError):
+        raise ProviderResponseError(_PROVIDER_NAME) from None
+    return delta, finish_reason, model, usage
 
 
 def _optional_non_negative_int(value: object) -> Optional[int]:
