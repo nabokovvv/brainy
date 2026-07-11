@@ -212,7 +212,7 @@ class SerpApiSearchProvider:
 
 
 class RotatingSearchProvider:
-    """Fan out to all quota-eligible providers and merge successful results."""
+    """Try quota-eligible providers in order, spending one slot per attempt."""
 
     name = "rotation"
 
@@ -225,36 +225,27 @@ class RotatingSearchProvider:
     async def search(self, request: SearchQuery) -> Sequence[SearchResult]:
         if await self._ledger.is_globally_disabled():
             raise SearchUnavailableError("web search disabled until next month")
-        selected: list[tuple[ProviderConfig, SearchProvider]] = []
+        attempted = False
+        had_success = False
         for config, provider in self._providers:
-            if await self._ledger.reserve(config.name):
-                selected.append((config, provider))
-        if not selected:
+            if not await self._ledger.reserve(config.name):
+                continue
+            attempted = True
+            try:
+                results = tuple(await provider.search(request))
+            except Exception:
+                await self._ledger.mark_failed(config.name)
+                continue
+            had_success = True
+            if results:
+                return results
+        if had_success:
+            return ()
+        if not attempted:
             await self._disable_if_exhausted()
             raise SearchUnavailableError("web search quota unavailable")
-
-        outcomes = await asyncio.gather(
-            *(self._run_provider(config, provider, request) for config, provider in selected),
-            return_exceptions=True,
-        )
-        merged: list[SearchResult] = []
-        for outcome in outcomes:
-            if isinstance(outcome, BaseException):
-                continue
-            merged.extend(outcome)
-        if not merged and all(isinstance(outcome, BaseException) for outcome in outcomes):
-            await self._disable_if_exhausted()
-            raise SearchUnavailableError("all web search providers failed")
-        return tuple(merged)
-
-    async def _run_provider(
-        self, config: ProviderConfig, provider: SearchProvider, request: SearchQuery
-    ) -> Sequence[SearchResult]:
-        try:
-            return await provider.search(request)
-        except Exception as exc:
-            await self._ledger.mark_failed(config.name)
-            raise WebSearchError(f"{config.name} search failed") from exc
+        await self._disable_if_exhausted()
+        raise SearchUnavailableError("all web search providers failed")
 
     async def _disable_if_exhausted(self) -> None:
         if await self._ledger.is_globally_disabled():
@@ -276,13 +267,13 @@ def build_rotating_provider(
     provider_configs = tuple(
         provider
         for provider in (
+            ProviderConfig("tavily", settings.tavily_api_key, settings.tavily_monthly_limit)
+            if settings.tavily_api_key
+            else None,
             ProviderConfig(
                 "brave", settings.brave_search_api_key, settings.brave_search_monthly_limit
             )
             if settings.brave_search_api_key
-            else None,
-            ProviderConfig("tavily", settings.tavily_api_key, settings.tavily_monthly_limit)
-            if settings.tavily_api_key
             else None,
             ProviderConfig("serpapi", settings.serpapi_api_key, settings.serpapi_monthly_limit)
             if settings.serpapi_api_key

@@ -12,8 +12,9 @@ one chat with an explicit `Web OFF/ON` route switch; the old Deep/Web modes and 
 provider stack have been removed. The spaCy/reranker/page/Wikidata research utilities
 are preserved as a dormant optional extra for Stage 2. Web ON rotates configured
 zero-cost Brave Search, Tavily, and SerpAPI adapters with a persistent monthly
-quota ledger. Providers are queried in parallel; when every configured provider is
-exhausted or unavailable, Web ON is disabled until the next UTC calendar month.
+quota ledger. Providers are tried sequentially in Tavily → Brave → SerpAPI order;
+when every configured provider is exhausted or unavailable, Web ON is disabled
+until the next UTC calendar month.
 
 ## Product boundaries
 
@@ -91,11 +92,11 @@ never prompts, answers, or search content. The monthly limits are configured wit
 `BRAVE_SEARCH_MONTHLY_LIMIT=900`, `TAVILY_MONTHLY_LIMIT=900`, and
 `SERPAPI_MONTHLY_LIMIT=200`.
 
-The rotation order is Brave Search API, Tavily, then SerpAPI. A request reserves
-one monthly slot from every configured provider and runs those calls concurrently;
-successful results are merged and deduplicated by the evidence gateway. An API
-failure marks that provider unavailable for the current month. If no provider
-remains, Web ON is disabled until the next UTC month.
+The rotation order is Tavily, Brave Search API, then SerpAPI. A request reserves
+one monthly slot only from the provider currently being tried. A successful result
+normally consumes one quota; an API failure marks that provider unavailable for the
+current month and the next provider is tried. If no provider remains, Web ON is
+disabled until the next UTC month.
 
 `OLLAMA_TIMEOUT` (seconds, default `120`, must stay within `0-120`) and
 `OLLAMA_CONTEXT_TOKENS` (default `65536`, must stay within `1-65536`) control the

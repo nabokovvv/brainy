@@ -70,17 +70,16 @@ Ollama loopback API на target готов. Однако живой Telegram run
 найден: в runtime-каталоге отсутствует `.env`, поэтому нельзя запускать Bot API
 smoke или отправлять реальные сообщения без явного provisioning token.
 
-Legacy DuckDuckGo path удалён. Новый Web ON runtime использует параллельную
-ротацию Brave Search API, Tavily и SerpAPI с лимитами 900/900/200 запросов в UTC
+Legacy DuckDuckGo path удалён. Новый Web ON runtime использует sequential rotation
+Tavily → Brave Search API → SerpAPI с лимитами 900/900/200 запросов в UTC
 месяц. Счётчики хранятся в `SEARCH_QUOTA_STATE_PATH` и не содержат пользовательский
 контент. При ошибках всех доступных API или исчерпании всех лимитов Web ON
 отключается до следующего UTC месяца.
 
-После настройки трёх ключей в защищённом runtime `.env` реальный parallel smoke
-успешно получил 14 результатов за 5.83 s; ledger записал по одному использованному
-запросу на каждого provider. Полный pipeline smoke успешно собрал 9 evidence items,
-валидировал 5 citations и завершился за 4.29 s: search 0.74 s, local synthesis
-3.55 s. Query, snippets и ответ в метрики/логи не записывались.
+После перехода на sequential rotation реальный smoke получил 3 результата за 0.53 s;
+quota delta составил `tavily=1`, `brave=0`, `serpapi=0`. Это подтверждает, что
+успешный запрос расходует только один provider quota. Query, snippets и ответ в
+метрики/логи не записывались.
 
 ### Дальнейшие шаги
 

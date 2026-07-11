@@ -315,7 +315,7 @@ Recommended commits:
 - [x] Добавлен provider-neutral `SearchQuery`/`SearchResult`/`SearchProvider` contract
   с bounded limit, абсолютными HTTP(S)-URL и canonical URL без fragment tracking;
   backend и сетевой runtime остаются следующим slice.
-- [x] Добавлена parallel rotation Brave Search API → Tavily → SerpAPI с общим
+- [x] Добавлена sequential rotation Tavily → Brave Search API → SerpAPI с общим
   SearchResult contract, shared HTTP client и provider-specific parsing.
 - [x] Добавлен persistent UTC-month quota ledger: 900/900/200 requests,
   provider failure/quota exhaustion и global fail-closed до следующего месяца.
