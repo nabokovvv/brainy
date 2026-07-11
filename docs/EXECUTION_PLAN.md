@@ -322,6 +322,8 @@ Recommended commits:
 - [x] Lifespan wiring shared `httpx` client и DuckDuckGo provider добавлен в runtime;
   adapter пока намеренно не вызывается Telegram handler-ом.
 - Web ON answer orchestration остаётся следующим вертикальным slice.
+- [x] Добавлен `SearchGateway -> EvidenceBundle -> GroundedSynthesizer`: стабильные
+  evidence IDs, canonical URL dedupe, token budget и валидация citation IDs.
 - URL canonicalization/dedup до загрузки страниц.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
 - Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.

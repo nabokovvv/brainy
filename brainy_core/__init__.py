@@ -19,6 +19,13 @@ from brainy_core.inference import (
 )
 from brainy_core.routing import RouteIntent
 from brainy_core.search import SearchProvider, SearchQuery, SearchResult
+from brainy_core.evidence import (
+    Evidence,
+    EvidenceBundle,
+    GroundedAnswer,
+    GroundedSynthesizer,
+    SearchGateway,
+)
 from brainy_core.use_cases import build_fast_chat_request
 
 __all__ = [
@@ -41,5 +48,10 @@ __all__ = [
     "SearchProvider",
     "SearchQuery",
     "SearchResult",
+    "Evidence",
+    "EvidenceBundle",
+    "GroundedAnswer",
+    "GroundedSynthesizer",
+    "SearchGateway",
     "build_fast_chat_request",
 ]
