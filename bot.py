@@ -765,10 +765,27 @@ async def grounded_web_reply_handler(
 
     try:
         started_at = time.perf_counter()
+        # Web synthesis returns the answer in one shot, so there is nothing to
+        # token-stream. Show phased progress drafts (search → synthesis) so the
+        # chat feels alive alongside the typing indicator.
+        chat_id = update.effective_chat.id
+        draft_id = next(_draft_ids)
+        await _send_progress_draft(
+            context.bot,
+            chat_id,
+            draft_id=draft_id,
+            text=translator.get_string("web_progress_searching", language),
+        )
         bundle = await gateway.build_bundle(SearchQuery(query=query, language=language))
         if not bundle.items:
             await update.message.reply_text(translator.get_string("web_unavailable", language))
             return
+        await _send_progress_draft(
+            context.bot,
+            chat_id,
+            draft_id=draft_id,
+            text=translator.get_string("web_progress_synthesizing", language),
+        )
         grounded = await synthesizer.synthesize(query, language, bundle)
         elapsed_s = time.perf_counter() - started_at
         badge = f"🌐 {max(elapsed_s, 0):.1f}s"

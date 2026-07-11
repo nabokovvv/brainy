@@ -33,7 +33,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Thanks for the feedback! 👍",
     "feedback_recorded_down": "Thanks — noted. 👎",
-    "feedback_expired": "This vote is no longer available."
+    "feedback_expired": "This vote is no longer available.",
+    "web_progress_searching": "🔎 Searching the web…",
+    "web_progress_synthesizing": "✍️ Writing the answer…"
   },
   "es": {
     "welcome_new_user": "👋 ¡Hola! Soy Brainy, tu asistente de IA. El idioma está configurado en español. ¿Quieres cambiarlo?",
@@ -69,7 +71,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "¡Gracias por tu opinión! 👍",
     "feedback_recorded_down": "Gracias, anotado. 👎",
-    "feedback_expired": "Este voto ya no está disponible."
+    "feedback_expired": "Este voto ya no está disponible.",
+    "web_progress_searching": "🔎 Buscando en la web…",
+    "web_progress_synthesizing": "✍️ Redactando la respuesta…"
   },
   "ru": {
     "welcome_new_user": "👋 Привет! Я Brainy, ваш ИИ‑помощник. Сейчас выбран русский язык. Хотите сменить язык?",
@@ -105,7 +109,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Спасибо за отзыв! 👍",
     "feedback_recorded_down": "Спасибо, учту. 👎",
-    "feedback_expired": "Этот голос уже недоступен."
+    "feedback_expired": "Этот голос уже недоступен.",
+    "web_progress_searching": "🔎 Ищу в интернете…",
+    "web_progress_synthesizing": "✍️ Формулирую ответ…"
   },
   "pt": {
     "welcome_new_user": "👋 Olá! Sou o Brainy, seu assistente de IA. O idioma está definido como português. Quer mudar?",
@@ -141,7 +147,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Obrigado pelo feedback! 👍",
     "feedback_recorded_down": "Obrigado, anotado. 👎",
-    "feedback_expired": "Este voto não está mais disponível."
+    "feedback_expired": "Este voto não está mais disponível.",
+    "web_progress_searching": "🔎 Pesquisando na web…",
+    "web_progress_synthesizing": "✍️ Escrevendo a resposta…"
   },
   "fr": {
     "welcome_new_user": "👋 Salut ! Je suis Brainy, votre assistant IA. La langue est réglée sur le français. Voulez‑vous la changer ?",
@@ -177,7 +185,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Merci pour votre retour ! 👍",
     "feedback_recorded_down": "Merci, c’est noté. 👎",
-    "feedback_expired": "Ce vote n’est plus disponible."
+    "feedback_expired": "Ce vote n’est plus disponible.",
+    "web_progress_searching": "🔎 Recherche sur le web…",
+    "web_progress_synthesizing": "✍️ Rédaction de la réponse…"
   },
   "de": {
     "welcome_new_user": "👋 Hallo! Ich bin Brainy, dein KI‑Assistent. Die Sprache ist auf Deutsch eingestellt. Möchtest du sie ändern?",
@@ -213,7 +223,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Danke für dein Feedback! 👍",
     "feedback_recorded_down": "Danke, notiert. 👎",
-    "feedback_expired": "Diese Abstimmung ist nicht mehr verfügbar."
+    "feedback_expired": "Diese Abstimmung ist nicht mehr verfügbar.",
+    "web_progress_searching": "🔎 Suche im Web…",
+    "web_progress_synthesizing": "✍️ Formuliere die Antwort…"
   },
   "tr": {
     "welcome_new_user": "👋 Merhaba! Ben Brainy, yapay zekâ asistanın. Dil Türkçe olarak ayarlı. Değiştirmek ister misiniz?",
@@ -249,7 +261,9 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Geri bildirimin için sağ ol! 👍",
     "feedback_recorded_down": "Anlaşıldı, not aldım. 👎",
-    "feedback_expired": "Bu oy artık kullanılamıyor."
+    "feedback_expired": "Bu oy artık kullanılamıyor.",
+    "web_progress_searching": "🔎 Web'de aranıyor…",
+    "web_progress_synthesizing": "✍️ Yanıt yazılıyor…"
   },
   "id": {
     "welcome_new_user": "👋 Halo! Saya Brainy, asisten AI Anda. Bahasa disetel ke bahasa Indonesia. Ingin menggantinya?",
@@ -285,6 +299,8 @@
     "feedback_thumbs_down_button": "👎",
     "feedback_recorded_up": "Terima kasih atas masukannya! 👍",
     "feedback_recorded_down": "Terima kasih, sudah dicatat. 👎",
-    "feedback_expired": "Suara ini sudah tidak berlaku."
+    "feedback_expired": "Suara ini sudah tidak berlaku.",
+    "web_progress_searching": "🔎 Mencari di web…",
+    "web_progress_synthesizing": "✍️ Menyusun jawaban…"
   }
 }
