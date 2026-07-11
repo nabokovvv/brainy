@@ -8,8 +8,10 @@
 
 ## Executive Summary
 
-**Bot API 10.1 Rich Messages are NOT yet available in PTB 22.8.**  
-No `RichMessage`, `RichText*`, `RichBlock*`, `send_rich_message`, or `send_rich_message_draft` classes/methods exist in PTB 22.8.
+PTB 22.8 has no typed wrappers for Bot API 10.1 Rich Messages, but its public
+`Bot.do_api_request()` escape hatch supports new raw endpoints. Brainy uses that path
+for `sendRichMessage` and retains the wrapped MarkdownV2/plain sender as a mandatory
+persistent fallback.
 
 ---
 
@@ -17,8 +19,8 @@ No `RichMessage`, `RichText*`, `RichBlock*`, `send_rich_message`, or `send_rich_
 
 | Feature | Bot API 10.1 | PTB 22.8 | Fallback in Brainy |
 |---------|-------------|----------|-------------------|
-| `sendRichMessage` | ✅ | ❌ | N/A |
-| `sendRichMessageDraft` (streaming) | ✅ | ❌ | Typing + `edit_message_text` chunks |
+| `sendRichMessage` | ✅ | Raw only | `do_api_request` -> MarkdownV2/plain |
+| `sendRichMessageDraft` (streaming) | ✅ | Raw only | wrapped `sendMessageDraft` |
 | `RichTextBold` / `Italic` / `Code` / `Url` | ✅ | ❌ | MarkdownV2 + `MessageEntity` |
 | `RichTextMathematicalExpression` | ✅ | ❌ | `$...$` / `$$...$$` (client-side) |
 | `RichTextReference` / `RichTextReferenceLink` (citations) | ✅ | ❌ | Manual `[n]` + ref list |
@@ -43,16 +45,16 @@ No `RichMessage`, `RichText*`, `RichBlock*`, `send_rich_message`, or `send_rich_
 | Math (LaTeX) | `$...$` inline, `$$...$$` display — **client-side only** |
 | Tables | Markdown `| a | b |\n|---|---|` |
 | Citations | Manual `[1]` in text + `[1]: URL` at bottom (handled by `_SOURCES_LINE`) |
-| Streaming | Typing indicator (`send_chat_action`) + periodic `edit_message_text` chunks |
+| Streaming | Same-ID `sendMessageDraft` fed by provider token deltas; typing fallback |
 
 ---
 
 ## Raw API Required For
 
-- True progressive streaming (`sendRichMessageDraft`)
+- Full rich-draft blocks (`sendRichMessageDraft`); Brainy currently streams plain drafts
 - Collapsible details (`RichBlockDetails`)
 - Native citations with clickable reference links (`RichTextReferenceLink`)
-- Message effects (fireworks/confetti — requires Stars, against zero-budget policy)
+- Rich message effects; paid broadcasts remain forbidden, ordinary effects are optional
 - Rich block tables with alignment/merging
 - Server-side math rendering guarantee
 
@@ -60,20 +62,25 @@ No `RichMessage`, `RichText*`, `RichBlock*`, `send_rich_message`, or `send_rich_
 
 ## Brainy Stage 1 Decision
 
-**Stick with `MARKDOWN_V2` + current `escape_markdown_v2()` implementation** (`bot.py:153-206`).
+Use raw `sendRichMessage` through PTB's supported `do_api_request`, guarded by a
+process-level circuit breaker and a `TELEGRAM_RICH_MESSAGES` switch. Fall back to the
+existing MarkdownV2/plain sender on unsupported, oversized, rejected, or transient
+calls.
 
 Rationale:
 - Zero external dependencies
 - Works on all Telegram clients (official + third-party)
 - No paid features (effects, Stars)
-- Progressive delivery achievable via existing typing + edit pattern
-- Rich Messages in PTB will arrive in 23.x/24.x — revisit then
+- Native headings/lists/code/math are available today without waiting for a wrapper
+- Model-authored HTML, links and remote media are removed before either render path
+- A transport failure is ambiguous because Telegram has no send idempotency key;
+  delivery-first fallback can rarely duplicate a final rather than lose it
 
 ---
 
 ## Revisit Triggers
 
-- PTB 23.x+ release notes mention `RichMessage`, `send_rich_message`
+- PTB release notes add typed `RichMessage` / `send_rich_message` wrappers
 - Bot API 11.x adds new rich block types
 - User demand for collapsible details or native citations exceeds manual workaround pain
 
@@ -83,5 +90,6 @@ Rationale:
 
 - `bot.py:153-206` — `escape_markdown_v2()` MarkdownV2 sanitizer
 - `bot.py:671-842` — `send_long_message()` with code extraction
-- `bot.py:348-358` — `send_typing_periodically()` for progressive feel
+- `telegram_renderer.py` — safe raw rich sender and circuit breaker
+- `bot.py` — provider streaming, draft publisher and regular persistent fallback
 - `translations.json` — 29 keys × 8 locales, all present
