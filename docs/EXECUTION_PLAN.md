@@ -246,7 +246,9 @@ Full-context retention smoke прошёл на фактических
 - Использовать expandable quotes, structured citations, code/math formatting и уместные бесплатные message effects; не использовать paid broadcasts/Stars.
 - Убрать spaCy, Wikidata, chart generator и тяжёлый reranker из fast path; Whisper сохраняется как поддерживаемый voice path.
 - Зафиксировать точный установленный tag Gemma на Mac и использовать его как первый local benchmark candidate.
-- Добавить latency/source badge и feedback button.
+- [x] Добавить latency badge и feedback button (👍/👎, sampled every 8-12 replies,
+  no dialogue-text storage — см. `docs/FEEDBACK_DESIGN.md`, `brainy_core/feedback.py`).
+  Source badge остаётся open для Web ON.
 
 Checkpoint UX: Bot API 10.0+ `sendMessageDraft` подключён через PTB 22.8 как
 неблокирующий fail-soft animated Thinking preview; typing остаётся fallback. Это
@@ -254,8 +256,9 @@ Checkpoint UX: Bot API 10.0+ `sendMessageDraft` подключён через PT
 Настоящий Ollama token streaming подключён к тому же draft ID; медленные Telegram
 обновления вынесены из inference loop и не создают backpressure. Финальный Rich
 Message path подключён с process-level circuit breaker и persistent fallback; trusted
-citations появятся вместе с EvidenceBundle в Stage 2. Feedback button остаётся следующим
-Stage 1 slice.
+citations появятся вместе с EvidenceBundle в Stage 2. Feedback button (👍/👎) подключён
+к обоим final-путям (rich и MarkdownV2 fallback) с bounded TTL-стором метаданных, без
+хранения текста диалогов.
 
 Gate:
 
