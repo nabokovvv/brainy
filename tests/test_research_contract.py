@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from brainy_core.web_safety import is_safe_public_http_url
+from brainy_core.search import SearchQuery, SearchResult
 from wikidata_mapper import _escape_sparql_literal, _get_p31_for_qid, get_qid_from_entity
 
 
@@ -16,6 +17,25 @@ class FailingHttpClient:
 
 
 class ResearchContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_search_contract_normalizes_safe_result_urls(self) -> None:
+        request = SearchQuery(query="latest local news", language="en", limit=3)
+        result = SearchResult(
+            title="Example",
+            url="HTTPS://Example.COM/story/?q=1#tracking",
+            snippet="A bounded snippet.",
+            rank=1,
+            provider="fake",
+        )
+
+        self.assertEqual(request.limit, 3)
+        self.assertEqual(result.canonical_url, "https://example.com/story?q=1")
+
+    def test_search_contract_rejects_unbounded_or_unsafe_inputs(self) -> None:
+        with self.assertRaises(ValueError):
+            SearchQuery(query="x", language="en", limit=11)
+        with self.assertRaises(ValueError):
+            SearchResult("Title", "javascript:alert(1)", "Snippet", 1, "fake")
+
     def test_public_url_admission_rejects_local_and_credentialed_targets(self) -> None:
         rejected = {
             "ftp://example.com/file",

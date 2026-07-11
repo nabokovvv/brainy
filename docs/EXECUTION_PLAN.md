@@ -313,7 +313,10 @@ Recommended commits:
 
 ### Search contract
 
-- Ввести `SearchProvider` и нормализованный `SearchResult`.
+- [x] Добавлен provider-neutral `SearchQuery`/`SearchResult`/`SearchProvider` contract
+  с bounded limit, абсолютными HTTP(S)-URL и canonical URL без fragment tracking;
+  backend и сетевой runtime остаются следующим slice.
+- Подключить первый backend к этому контракту.
 - Shared async client, timeouts, retry только для transient errors, circuit breaker и cache.
 - URL canonicalization/dedup до загрузки страниц.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
