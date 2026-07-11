@@ -7,16 +7,18 @@ import logging
 import random
 import re
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
 
 import httpx
 import telegram.error
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Update
 from telegram import InputFile
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
+from telegram.helpers import escape_markdown
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -723,6 +725,19 @@ async def fast_reply_handler(
         await asyncio.gather(draft_task, return_exceptions=True)
 
 
+def _display_host(url: str) -> str:
+    """Human-readable host label: decode IDNA/punycode, drop a leading ``www.``."""
+
+    host = urlparse(url).hostname or url
+    try:
+        host = host.encode("ascii").decode("idna")
+    except (UnicodeError, ValueError):
+        pass
+    if host.startswith("www."):
+        host = host[4:]
+    return host[:1].upper() + host[1:]
+
+
 async def grounded_web_reply_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE, query: str, *, language: str
 ) -> None:
@@ -735,25 +750,43 @@ async def grounded_web_reply_handler(
         return
 
     try:
+        started_at = time.perf_counter()
         bundle = await gateway.build_bundle(SearchQuery(query=query, language=language))
         if not bundle.items:
             await update.message.reply_text(translator.get_string("web_unavailable", language))
             return
         grounded = await synthesizer.synthesize(query, language, bundle)
+        elapsed_s = time.perf_counter() - started_at
+        badge = f"🌐 {max(elapsed_s, 0):.1f}s"
         top_citations = grounded.citations[:3]
-        sources = "\n".join(
-            f"[{index}] [{urlparse(item.canonical_url).hostname or item.canonical_url}]"
-            f"({item.canonical_url})"
+
+        # Sanitize the model-authored answer (strip any model links), then attach
+        # the app-trusted citation URLs as real MarkdownV2 links. Web ON must use
+        # the regular send path — the rich renderer strips links and cannot show a
+        # link preview. Telegram renders at most one preview per message, so point
+        # it at the top source.
+        safe_answer = sanitize_untrusted_markdown(grounded.answer, neutralize_plain_urls=True)
+        body = escape_markdown_v2(f"{safe_answer}\n\n{badge}")
+        source_lines = [
+            f"{index}\\. [{escape_markdown(_display_host(item.canonical_url), version=2)}]"
+            f"({escape_markdown(item.canonical_url, version=2, entity_type='text_link')})"
             for index, item in enumerate(top_citations, start=1)
+        ]
+        message = f"{body}\n\n{chr(10).join(source_lines)}" if source_lines else body
+        link_preview = (
+            LinkPreviewOptions(
+                url=top_citations[0].canonical_url,
+                is_disabled=False,
+                prefer_small_media=True,
+            )
+            if top_citations
+            else LinkPreviewOptions(is_disabled=True)
         )
-        answer = grounded.answer if not sources else f"{grounded.answer}\n\n{sources}"
-        renderer = context.application.bot_data.get("rich_message_renderer")
-        if renderer is not None and await renderer.send_final(
-            context.bot, chat_id=update.effective_chat.id, answer=answer, badge="🌐 Live"
-        ):
-            return
         await send_long_message(
-            update, escape_markdown_v2(answer), parse_mode=ParseMode.MARKDOWN_V2
+            update,
+            message,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            link_preview_options=link_preview,
         )
     except (ProviderError, ValueError) as exc:
         logger.warning("Grounded web reply failed type=%s", type(exc).__name__)
@@ -806,8 +839,9 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
                 route_intent.value,
             )
 
-            if route_intent is RouteIntent.LOCAL:
-                typing_task = asyncio.create_task(send_typing_periodically(context.bot, chat_id))
+            # Keep a typing indicator alive for both routes; the Web ON path can
+            # spend tens of seconds in search + synthesis with no draft stream.
+            typing_task = asyncio.create_task(send_typing_periodically(context.bot, chat_id))
 
             chat_locks = app_data["chat_locks"]
             chat_lock = chat_locks.setdefault(chat_id, asyncio.Lock())

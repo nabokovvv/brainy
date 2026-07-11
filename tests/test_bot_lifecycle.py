@@ -35,7 +35,12 @@ def _load_bot_with_telegram_stub():
     telegram.InlineKeyboardButton = _DummyTelegramObject
     telegram.InlineKeyboardMarkup = _DummyTelegramObject
     telegram.InputFile = _DummyTelegramObject
+    telegram.LinkPreviewOptions = _DummyTelegramObject
     telegram.Update = type("Update", (), {"ALL_TYPES": object()})
+
+    telegram_helpers = types.ModuleType("telegram.helpers")
+    telegram_helpers.escape_markdown = lambda text, *args, **kwargs: text
+    telegram.helpers = telegram_helpers
 
     telegram_ext = types.ModuleType("telegram.ext")
     telegram_ext.Application = _DummyTelegramObject
@@ -68,6 +73,7 @@ def _load_bot_with_telegram_stub():
         "telegram.constants": telegram_constants,
         "telegram.error": telegram_error,
         "telegram.ext": telegram_ext,
+        "telegram.helpers": telegram_helpers,
     }
     with patch.dict(sys.modules, modules):
         sys.modules.pop("bot", None)
