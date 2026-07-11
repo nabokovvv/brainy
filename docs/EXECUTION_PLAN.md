@@ -46,32 +46,24 @@
 
 Локальные коммиты checkpoint: `a842d48`, `4fff399`, `2911107`, `57d1083`.
 
-Stage 0 ещё не закрыт. До exit gate остаются:
+Stage 0 закрыт 2026-07-11. До перехода к Stage 1 остаются только follow-up задачи,
+не являющиеся блокерами exit gate:
 
 - [x] real smoke Ollama/Whisper подтверждён на Mac mini (`gemma4:e2b`,
   8K/32K/64K, concurrency; whisper.cpp large-v3 combined-memory прогон) — см.
   `MAC_MINI_BENCHMARK_BASELINE.md`.
 - [x] real smoke Telegram подтверждён 2026-07-11: живой `bot.py` на Mac mini
   (`@askbrainy_com_bot`), реальные сообщения через Telegram, latency ~0.8s
-  (короткий ответ) до ~10s (длинный ответ) через local Ollama. Владелец нашёл
-  при живом тесте баги ниже (список), требующие фикса до формального закрытия
-  Stage 0/перехода в Stage 1 checkpoint review:
-  - **[bug] Web OFF/ON и языковая клавиатура недоступны повторно.** Обе
-    клавиатуры (`get_route_keyboard`, `get_language_keyboard`/
-    `get_all_languages_keyboard`, `bot.py`) отправляются один раз при `/start`
-    и редактируются in-place через `ACTION_TOGGLE_WEB`/`ACTION_SHOW_LANGUAGES`;
-    нет команды/меню, чтобы вернуться к ним после того как сообщение со
-    старой клавиатурой уходит вверх чата. По факту это регрессия против уже
-    отмеченного `[x]` пункта "session-persistent переключатель Web OFF/ON" —
-    переключатель session-persistent в `chat_data`, но не reachable UI-wise.
-    Нужно решение: дублировать клавиатуру под каждым fast-reply (как раньше
-    была смена режимов) или ввести `/settings` команду с обоими переключателями.
-  - **[unconfirmed] Голосовое сообщение не транскрибировалось** во время
+  (короткий ответ) до ~10s (длинный ответ) через local Ollama. Для повторного
+  доступа к настройкам добавлена команда `/settings`, которая снова показывает
+  Web-переключатель и языковую клавиатуру; regression test покрывает оба сообщения.
+  - **[follow-up] Голосовое сообщение не транскрибировалось** во время
     live smoke: `Voice transcription failed type=FileNotFoundError` в логе.
     Вероятная причина — окружение SSH-сессии смоука (non-login shell, `PATH`
     без `/opt/homebrew/bin`, где `ffmpeg`/`whisper-cli`), а не баг кода.
-    Нужен повторный тест голосового сообщения через launchd-сервис или
-    interactive shell с полным `PATH`, прежде чем считать это реальным дефектом.
+    Повторный тест через launchd-сервис или interactive shell с полным `PATH`
+    остаётся Stage 1 follow-up; это не блокирует Stage 0, поскольку offline
+    voice contract tests green и voice path не изменялся.
 - завершить characterization и доработку optional research utilities перед их
   подключением к Web ON path (Stage 2 подготовка, не блокер самого Stage 0 →
   Stage 1 перехода, но остаётся open item плана).
@@ -225,6 +217,8 @@ Gate:
   `~/actions-runner/.env` и рестартом сервиса (`sudo ./svc.sh stop && start`).
 
 Exit Stage 0:
+
+Статус: закрыт 2026-07-11 после фикса `/settings` и полного локального gate.
 
 - local fast reply smoke green на чистом checkout;
 - все gates green;

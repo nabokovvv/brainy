@@ -336,6 +336,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Re-open the persistent route and language controls on demand."""
+
+    chat_id = update.effective_chat.id
+    lang = context.chat_data.get("language", "en")
+    translator = context.application.bot_data["translator"]
+    status_key = (
+        "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
+    )
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=translator.get_string(status_key, lang),
+        reply_markup=get_route_keyboard(context, lang),
+    )
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=translator.get_string("language_selection_prompt", lang),
+        reply_markup=get_all_languages_keyboard(context),
+    )
+
+
 # ---------------------------------------------------------------------------#
 #                       Button Callback Handler                              #
 # ---------------------------------------------------------------------------#
@@ -1220,6 +1242,7 @@ async def main_async() -> None:
     )
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("settings", settings))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))

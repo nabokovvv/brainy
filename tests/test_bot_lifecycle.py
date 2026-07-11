@@ -78,6 +78,8 @@ bot = _load_bot_with_telegram_stub()
 
 
 class _Translator:
+    supported_languages = ("en", "ru")
+
     def get_string(self, key: str, lang: str, **kwargs: object) -> str:
         return f"{key}:{lang}"
 
@@ -215,6 +217,25 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         }
 
         self.assertFalse([name for name in removed_handlers if hasattr(bot, name)])
+
+    async def test_settings_reopens_route_and_language_controls(self) -> None:
+        telegram_bot = _Bot()
+        update = SimpleNamespace(effective_chat=SimpleNamespace(id=42))
+        context = SimpleNamespace(
+            bot=telegram_bot,
+            chat_data={"language": "ru", "web_enabled": True},
+            application=SimpleNamespace(
+                bot_data={"translator": _Translator()},
+            ),
+        )
+
+        await bot.settings(update, context)
+
+        self.assertEqual(len(telegram_bot.sent), 2)
+        self.assertEqual(telegram_bot.sent[0][1]["text"], "web_status_on:ru")
+        self.assertEqual(telegram_bot.sent[1][1]["text"], "language_selection_prompt:ru")
+        self.assertIsNotNone(telegram_bot.sent[0][1]["reply_markup"])
+        self.assertIsNotNone(telegram_bot.sent[1][1]["reply_markup"])
 
     async def test_progress_draft_uses_nonzero_id_and_empty_thinking_text(self) -> None:
         telegram_bot = _Bot()
