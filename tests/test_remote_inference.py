@@ -52,6 +52,43 @@ class RemoteInferenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, 2)
             self.assertEqual(budget.used, 1)
 
+    async def test_rate_limiter_wait_does_not_consume_request_timeout(self) -> None:
+        # Pacing behind the shared RPM limiter is not request latency: a wait
+        # longer than timeout_seconds must not fail the request as a timeout.
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "model": "vendor/model",
+                    "choices": [{"message": {"content": "Ok."}, "finish_reason": "stop"}],
+                },
+                request=request,
+            )
+
+        class SlowRateBudget:
+            async def acquire(self) -> None:
+                import asyncio
+
+                await asyncio.sleep(0.3)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = DailyRequestBudget(Path(tmp) / "budget.json", provider="nvidia", limit=2)
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                provider = OpenAICompatibleRemoteProvider(
+                    provider_name="nvidia",
+                    base_url="https://integrate.api.nvidia.com/v1",
+                    api_key="test-key",
+                    model="vendor/model",
+                    client=client,
+                    budget=budget,
+                    rate_budget=SlowRateBudget(),
+                    timeout_seconds=0.1,
+                )
+                result = await provider.chat(_request())
+
+            self.assertEqual(result.text, "Ok.")
+            self.assertLess(result.latency_ms, 250)
+
     async def test_auth_error_is_not_retried(self) -> None:
         calls = 0
 

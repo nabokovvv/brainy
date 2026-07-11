@@ -61,6 +61,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--nvidia-daily-limit", type=int, default=_env_int("NVIDIA_DAILY_LIMIT", 40)
     )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60,
+        help="Per-request timeout in seconds; free-tier models routinely need more than 30.",
+    )
     return parser
 
 
@@ -125,7 +131,7 @@ async def main() -> int:
                     limit=limit,
                 ),
                 rate_budget=rate_budget,
-                timeout_seconds=30,
+                timeout_seconds=args.timeout,
             )
             result = await run_multilingual_canary(provider)
             reports.append(

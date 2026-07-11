@@ -194,11 +194,13 @@ class OpenAICompatibleRemoteProvider:
 
     async def chat(self, request: ChatRequest) -> ChatResult:
         self._reserve()
-        started = time.monotonic()
         payload = self._payload(request, stream=False)
+        # Waiting out the shared RPM limiter is expected pacing, not request
+        # latency, so it must not consume the timeout window or the latency.
+        await self._rate_budget.acquire()
+        started = time.monotonic()
         try:
             async with asyncio.timeout(self._timeout_seconds):
-                await self._rate_budget.acquire()
                 async with self._semaphore:
                     response = await self._request_with_retry(payload, stream=False)
         except TimeoutError:
@@ -208,13 +210,13 @@ class OpenAICompatibleRemoteProvider:
 
     async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
         self._reserve()
-        started = time.monotonic()
         text_parts: list[str] = []
         finish_reason: str | None = None
         response_model = self._model.name
+        await self._rate_budget.acquire()
+        started = time.monotonic()
         try:
             async with asyncio.timeout(self._timeout_seconds):
-                await self._rate_budget.acquire()
                 async with self._semaphore:
                     response = await self._request_with_retry(
                         self._payload(request, stream=True), stream=True
