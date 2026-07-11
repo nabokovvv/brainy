@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import socket
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import config
 from brainy_core.web_safety import is_global_ip_address, is_safe_public_http_url
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {"text/html", "application/xhtml+xml", "text/plain"}
 MAX_PAGES_PER_REQUEST = 4
+MAX_REDIRECTS = 3
 
 
 class TextChunk:
@@ -110,18 +111,33 @@ async def fetch_page(session, url: str, retries: int = 2):
         logger.warning("Rejected unsafe fetch URL")
         return None
 
-    host = urlparse(url).hostname or "unknown"
     headers = {"User-Agent": config.CUSTOM_USER_AGENT}
     aiohttp = _get_aiohttp()
     timeout = aiohttp.ClientTimeout(total=10, connect=5)
+    target_url = url
+    redirect_count = 0
     for attempt in range(retries):
+        host = urlparse(target_url).hostname or "unknown"
         try:
             async with session.get(
-                url,
+                target_url,
                 timeout=timeout,
                 headers=headers,
                 allow_redirects=False,
             ) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("Location")
+                    redirect_count += 1
+                    if not location or redirect_count > MAX_REDIRECTS:
+                        logger.warning("Rejected redirect chain host=%s", host)
+                        return None
+                    target_url = urljoin(target_url, location)
+                    if not is_safe_public_http_url(
+                        target_url
+                    ) or not await _host_resolves_only_to_public_addresses(target_url):
+                        logger.warning("Rejected unsafe redirect host=%s", host)
+                        return None
+                    continue
                 if response.status in {429, 503} and attempt < retries - 1:
                     await asyncio.sleep(2**attempt)
                     continue

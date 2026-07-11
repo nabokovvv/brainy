@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 from brainy_core.web_safety import is_safe_public_http_url
 from brainy_core.search import SearchQuery, SearchResult
-from page_processor import _canonical_page_url, chunk_text
+from page_processor import _canonical_page_url, _read_bounded_body, chunk_text, fetch_page
 from wikidata_mapper import _escape_sparql_literal, _get_p31_for_qid, get_qid_from_entity
 
 
@@ -15,6 +17,39 @@ ROOT = Path(__file__).resolve().parents[1]
 class FailingHttpClient:
     async def get(self, *args: object, **kwargs: object) -> None:
         raise AssertionError("invalid input must fail before network I/O")
+
+
+class FixtureContent:
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    async def iter_chunked(self, _size):
+        for chunk in self.chunks:
+            yield chunk
+
+
+class FixtureResponse:
+    def __init__(self, status, headers=None, body=b""):
+        self.status = status
+        self.headers = headers or {}
+        self.charset = "utf-8"
+        self.content = FixtureContent([body])
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+
+class FixtureSession:
+    def __init__(self, responses):
+        self.responses = responses
+        self.requested = []
+
+    def get(self, url, **_kwargs):
+        self.requested.append(url)
+        return self.responses[url]
 
 
 class ResearchContractTests(unittest.IsolatedAsyncioTestCase):
@@ -72,6 +107,8 @@ class ResearchContractTests(unittest.IsolatedAsyncioTestCase):
             "ALLOWED_CONTENT_TYPES",
             "_host_resolves_only_to_public_addresses",
             "is_safe_public_http_url",
+            "MAX_REDIRECTS",
+            "urljoin",
         }
 
         self.assertFalse([item for item in forbidden if item in source])
@@ -103,6 +140,26 @@ class ResearchContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await get_qid_from_entity(client, "entity", "../../en"))
         self.assertIsNone(await get_qid_from_entity(client, "x" * 257, "en"))
         self.assertEqual(await _get_p31_for_qid(client, "not-a-qid"), [])
+
+    async def test_redirect_fixture_revalidates_target_before_following(self) -> None:
+        session = FixtureSession(
+            {
+                "https://example.com/start": FixtureResponse(
+                    302, {"Location": "http://localhost/private"}
+                )
+            }
+        )
+        with patch("page_processor._host_resolves_only_to_public_addresses", return_value=True):
+            self.assertIsNone(await fetch_page(session, "https://example.com/start"))
+        self.assertEqual(session.requested, ["https://example.com/start"])
+
+    async def test_oversized_body_fixture_is_rejected(self) -> None:
+        response = SimpleNamespace(
+            headers={"Content-Length": "11"},
+            content=FixtureContent([b"01234567890"]),
+        )
+        with self.assertRaises(ValueError):
+            await _read_bounded_body(response, limit=10)
 
     def test_research_logs_do_not_include_response_or_page_content(self) -> None:
         sources = "\n".join(

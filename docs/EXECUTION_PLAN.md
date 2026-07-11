@@ -331,6 +331,10 @@ Recommended commits:
 - [x] Безопасный page fetcher принимает shared lifespan session, canonicalizes URL до
   dedupe, ограничивает число страниц/размер ответа/content types и сохраняет SSRF
   admission checks; offline tests покрывают canonical URL и multilingual chunking.
+- [x] Redirects обрабатываются вручную с bounded hop count и повторной public-DNS/
+  SSRF-проверкой каждого target; автоматические redirects отключены.
+- [x] Offline HTTP fixtures покрывают unsafe redirect target и oversized response;
+  тесты не выполняют сетевых запросов.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
 - Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.
 
