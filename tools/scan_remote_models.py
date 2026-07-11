@@ -22,6 +22,7 @@ from brainy_core.providers.remote import (
     DailyRequestBudget,
     MinuteRateBudget,
     OpenAICompatibleRemoteProvider,
+    RetryPolicy,
 )
 
 NVIDIA_MODELS_URL = f"{NVIDIA_BASE_URL}/models"
@@ -66,6 +67,12 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         default=60,
         help="Per-request timeout in seconds; free-tier models routinely need more than 30.",
+    )
+    parser.add_argument(
+        "--rpm",
+        type=int,
+        default=20,
+        help="Requests per minute; free tiers often throttle well below 20.",
     )
     return parser
 
@@ -117,7 +124,7 @@ async def main() -> int:
         )
         base_url = NVIDIA_BASE_URL if args.provider == "nvidia" else OPENROUTER_BASE_URL
         reports = []
-        rate_budget = MinuteRateBudget(20)
+        rate_budget = MinuteRateBudget(args.rpm)
         for model_id in selected:
             provider = OpenAICompatibleRemoteProvider(
                 provider_name=args.provider,
@@ -132,6 +139,9 @@ async def main() -> int:
                 ),
                 rate_budget=rate_budget,
                 timeout_seconds=args.timeout,
+                # Free tiers answer 429 with multi-second Retry-After values;
+                # honor them instead of giving up after the default 2s cap.
+                retry_policy=RetryPolicy(max_attempts=3, max_delay_seconds=20),
             )
             result = await run_multilingual_canary(provider)
             reports.append(

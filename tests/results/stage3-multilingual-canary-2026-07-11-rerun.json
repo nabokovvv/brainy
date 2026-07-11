@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-11",
+  "target": "Mac mini M4 16 GB",
+  "note": "Rerun after fixing the RPM-limiter/timeout interaction and the terse-answer gate. Run started with nvidia at 24/40 and openrouter at 40/50 of the daily budget, so the tail of each scan hit the fail-closed daily cap: those rows are 'budget_exhausted' below, not provider verdicts.",
+  "languages": ["de", "en", "es", "fr", "id", "pt", "ru", "tr"],
+  "stores_response_text": false,
+  "active_models": [],
+  "providers": {
+    "nvidia": {
+      "daily_counter_after_run": 40,
+      "daily_limit": 40,
+      "models": [
+        {
+          "model_id": "qwen/qwen3-next-80b-a3b-instruct",
+          "lifecycle": "quarantine",
+          "passed_languages": ["de", "es", "id", "pt", "tr"],
+          "error_codes": {"en": "timeout", "fr": "timeout", "ru": "timeout"},
+          "median_latency_ms": 22221.2,
+          "note": "Genuinely multilingual; failures are 60s timeouts on a slow free tier, not quality. Retry with a longer timeout or accept as web-synthesis fallback."
+        },
+        {
+          "model_id": "google/gemma-3-12b-it",
+          "lifecycle": "quarantine",
+          "passed_languages": [],
+          "error_codes": {"all": "request_rejected"},
+          "note": "HTTP 4xx on every request; model id looks retired on NVIDIA. Drop from NVIDIA_MULTILINGUAL_CANDIDATES."
+        },
+        {
+          "model_id": "meta/llama-3.3-70b-instruct",
+          "lifecycle": "untested",
+          "note": "budget_exhausted: daily cap reached mid-scan; all 'unavailable' errors were the local fail-closed budget."
+        }
+      ]
+    },
+    "openrouter": {
+      "daily_counter_after_run": 50,
+      "daily_limit": 50,
+      "models": [
+        {
+          "model_id": "google/gemma-4-31b-it:free",
+          "lifecycle": "quarantine",
+          "passed_languages": ["en"],
+          "error_codes": {"de,es,fr,id,pt,ru,tr": "unavailable"},
+          "median_latency_ms": 1430.7,
+          "note": "en passed in 1.4s; the rest are upstream 429s hit at 20 RPM with a 2s retry cap. Rerun with --rpm 5 and the new Retry-After-honoring policy."
+        },
+        {
+          "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
+          "lifecycle": "untested",
+          "note": "budget_exhausted after 2 requests."
+        },
+        {
+          "model_id": "openai/gpt-oss-120b:free",
+          "lifecycle": "untested",
+          "note": "budget_exhausted before first request."
+        }
+      ]
+    }
+  },
+  "rerun_commands": [
+    "PYTHONPATH=. .venv/bin/python tools/scan_remote_models.py --provider openrouter --canary --rpm 5 --model google/gemma-4-31b-it:free --model openai/gpt-oss-120b:free",
+    "PYTHONPATH=. .venv/bin/python tools/scan_remote_models.py --provider nvidia --canary --timeout 90 --model qwen/qwen3-next-80b-a3b-instruct --model meta/llama-3.3-70b-instruct"
+  ]
+}
