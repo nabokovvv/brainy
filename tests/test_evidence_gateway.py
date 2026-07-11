@@ -16,6 +16,23 @@ class FakeSearch:
         )
 
 
+class FailingSearch:
+    async def search(self, request):
+        raise RuntimeError("primary unavailable")
+
+
+class FallbackSearch:
+    async def search(self, request):
+        return (
+            SearchResult("Fallback", "https://fallback.example/a", "Fallback fact.", 1, "fallback"),
+        )
+
+
+class AlsoFailingSearch:
+    async def search(self, request):
+        raise RuntimeError("fallback unavailable")
+
+
 class FakeInference:
     model = ProviderModel("fake", "test", True)
 
@@ -74,6 +91,36 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.provenance, "page_chunk")
         self.assertEqual(page.trust, "page_content")
         self.assertLessEqual(bundle.estimated_tokens, 100)
+
+    async def test_page_chunks_apply_near_dedupe_and_source_diversity(self):
+        async def load_pages(_urls):
+            return [
+                FakePageChunk("Question answer current policy details.", "https://example.com/a"),
+                FakePageChunk("Question answer current policy details.", "https://example.com/b"),
+                FakePageChunk(
+                    "Independent source reports a different detail.", "https://other.org/c"
+                ),
+                FakePageChunk("Third same-host context.", "https://example.com/d"),
+            ]
+
+        bundle = await SearchGateway(FakeSearch(), page_loader=load_pages).build_bundle(
+            SearchQuery("question policy", "en")
+        )
+        page_items = [item for item in bundle.items if item.provenance == "page_chunk"]
+        self.assertEqual(len(page_items), 3)
+        self.assertEqual(len({item.canonical_url for item in page_items}), 3)
+
+    async def test_gateway_uses_fallback_only_after_primary_failure(self):
+        bundle = await SearchGateway(
+            FailingSearch(), fallback_provider=FallbackSearch()
+        ).build_bundle(SearchQuery("question", "en"))
+        self.assertEqual(bundle.items[0].provenance, "fallback")
+
+    async def test_gateway_surfaces_full_search_failure(self):
+        with self.assertRaisesRegex(RuntimeError, "fallback unavailable"):
+            await SearchGateway(
+                FailingSearch(), fallback_provider=AlsoFailingSearch()
+            ).build_bundle(SearchQuery("question", "en"))
 
 
 if __name__ == "__main__":

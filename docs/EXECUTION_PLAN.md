@@ -335,6 +335,11 @@ Recommended commits:
   SSRF-проверкой каждого target; автоматические redirects отключены.
 - [x] Offline HTTP fixtures покрывают unsafe redirect target и oversized response;
   тесты не выполняют сетевых запросов.
+- [x] Page chunks получают deterministic lexical rerank, near-duplicate collapse и
+  source diversity cap (не более двух chunks на host) до token-budget packing.
+- [x] Gateway поддерживает инъецируемый provider-neutral fallback: он вызывается
+  только после падения primary provider, а полное падение обоих providers прозрачно
+  поднимается в Web ON handler; multilingual fixtures покрывают все 8 локалей.
 - Язык и запрошенные пользователем search filters передаются каждому backend.
 - Provider-specific parsing остаётся внутри adapter; XML mixed content сохраняется полностью через `itertext()`.
 

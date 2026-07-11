@@ -127,6 +127,23 @@ class ResearchContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(chunks), 1)
         self.assertIn("ثالثة جملة", chunks[0].text)
 
+    def test_chunking_covers_all_product_locales(self) -> None:
+        samples = {
+            "en": "First sentence. Second sentence!",
+            "es": "Primera frase. Segunda frase!",
+            "ru": "Первое предложение. Второе предложение!",
+            "pt": "Primeira frase. Segunda frase!",
+            "fr": "Première phrase. Deuxième phrase !",
+            "de": "Erster Satz. Zweiter Satz!",
+            "tr": "İlk cümle. İkinci cümle!",
+            "id": "Kalimat pertama. Kalimat kedua!",
+        }
+        for language, sample in samples.items():
+            with self.subTest(language=language):
+                chunks = chunk_text(sample, "https://example.com")
+                self.assertTrue(chunks)
+                self.assertIn(" ".join(sample.split()), " ".join(chunk.text for chunk in chunks))
+
     def test_sparql_literal_escaping_removes_control_characters(self) -> None:
         escaped = _escape_sparql_literal('name" }\nSERVICE <https://example.com>')
 
