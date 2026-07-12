@@ -19,7 +19,7 @@ from telegramify_markdown import ContentType, telegramify
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Update
 from telegram import InputFile
 from telegram.constants import ChatAction
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -1199,6 +1199,43 @@ def _plain_fallback(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+# Backoff (seconds) between retries of a transient Telegram transport failure.
+_SEND_RETRY_BACKOFF = (0.5, 1.0, 2.0)
+
+
+async def _send_with_retry(send):
+    """Run an async Telegram send, retrying transient transport failures.
+
+    ``BadRequest`` is a content problem (retrying won't help) and is re-raised
+    at once so the caller can fall back to plain text. ``NetworkError`` /
+    ``TimedOut`` / ``RetryAfter`` are transient: a brief connectivity blip must
+    not discard a fully generated answer, so we retry with backoff before giving
+    up. ``send`` is a zero-arg callable returning a fresh coroutine each call.
+    """
+
+    last_exc: Exception | None = None
+    for attempt in range(len(_SEND_RETRY_BACKOFF) + 1):
+        try:
+            return await send()
+        except BadRequest:
+            raise
+        except RetryAfter as exc:
+            last_exc = exc
+            delay = getattr(exc, "retry_after", 1) or 1
+            await asyncio.sleep(float(delay) + 0.5)
+        except (NetworkError, TimedOut) as exc:
+            last_exc = exc
+            if attempt < len(_SEND_RETRY_BACKOFF):
+                logger.warning(
+                    "Telegram send transient failure type=%s attempt=%d; retrying",
+                    type(exc).__name__,
+                    attempt + 1,
+                )
+                await asyncio.sleep(_SEND_RETRY_BACKOFF[attempt])
+    assert last_exc is not None
+    raise last_exc
+
+
 async def send_rich(update, text: str, **kwargs):
     """Deliver a model answer to Telegram using entity-based formatting.
 
@@ -1228,7 +1265,9 @@ async def send_rich(update, text: str, **kwargs):
         )
     except Exception as exc:
         logger.warning("telegramify failed type=%s; sending plain text", type(exc).__name__)
-        await reply_target.reply_text(_plain_fallback(text), **base_kwargs, **tail_kwargs)
+        await _send_with_retry(
+            lambda: reply_target.reply_text(_plain_fallback(text), **base_kwargs, **tail_kwargs)
+        )
         return
 
     for index, box in enumerate(boxes):
@@ -1238,20 +1277,30 @@ async def send_rich(update, text: str, **kwargs):
         try:
             if box.content_type == ContentType.FILE:
                 document = InputFile(io.BytesIO(box.file_data), filename=box.file_name)
-                await reply_target.reply_document(
-                    document,
-                    caption=box.caption_text or None,
-                    caption_entities=box.caption_entities or None,
-                    **doc_kwargs,
+                await _send_with_retry(
+                    lambda box=box, doc_kwargs=doc_kwargs, document=document: (
+                        reply_target.reply_document(
+                            document,
+                            caption=box.caption_text or None,
+                            caption_entities=box.caption_entities or None,
+                            **doc_kwargs,
+                        )
+                    )
                 )
             else:
-                await reply_target.reply_text(
-                    box.text, entities=box.entities or None, **send_kwargs
+                await _send_with_retry(
+                    lambda box=box, send_kwargs=send_kwargs: reply_target.reply_text(
+                        box.text, entities=box.entities or None, **send_kwargs
+                    )
                 )
         except BadRequest as exc:
             logger.warning("Rich send failed type=%s; plain-text fallback", type(exc).__name__)
             source = text if box.content_type == ContentType.FILE else box.text
-            await reply_target.reply_text(_plain_fallback(source), **doc_kwargs)
+            await _send_with_retry(
+                lambda source=source, doc_kwargs=doc_kwargs: reply_target.reply_text(
+                    _plain_fallback(source), **doc_kwargs
+                )
+            )
 
 
 async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1369,12 +1418,19 @@ async def main_async() -> None:
         except ImportError:
             logger.warning("Research extra unavailable; Web ON will use search snippets only")
 
+    # Bounded, coherent HTTP timeouts. read/write cover regular API calls and
+    # sends (get_updates long-polling uses its own separate timeout); write is
+    # larger to allow document/code-file uploads. pool_timeout avoids spurious
+    # PoolTimeout when several workers send concurrently. Transient failures are
+    # retried in send_rich (_send_with_retry) rather than absorbed by a huge
+    # timeout that would pin a worker for minutes on a stuck connection.
     application = (
         Application.builder()
         .token(config.TELEGRAM_TOKEN)
-        .read_timeout(1500)
-        .write_timeout(1500)
-        .connect_timeout(30)
+        .connect_timeout(15)
+        .read_timeout(30)
+        .write_timeout(60)
+        .pool_timeout(30)
         .job_queue(JobQueue())
         .build()
     )

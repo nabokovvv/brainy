@@ -143,6 +143,37 @@ class SendRichTests(unittest.IsolatedAsyncioTestCase):
         upd.message.reply_text.assert_called_once()
         self.assertNotIn("parse_mode", upd.message.reply_text.call_args.kwargs)
 
+    async def test_transient_network_error_is_retried_then_succeeds(self):
+        from telegram.error import NetworkError
+
+        upd = self._make_update()
+        # First send raises a transient NetworkError, second succeeds.
+        upd.message.reply_text = AsyncMock(side_effect=[NetworkError("blip"), None])
+        with patch("bot._SEND_RETRY_BACKOFF", (0,)):
+            await send_rich(upd, "Just a short answer.")
+        self.assertEqual(upd.message.reply_text.call_count, 2)
+
+
+class SendWithRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bad_request_is_not_retried(self):
+        from bot import _send_with_retry
+        from telegram.error import BadRequest
+
+        send = AsyncMock(side_effect=BadRequest("bad"))
+        with self.assertRaises(BadRequest):
+            await _send_with_retry(send)
+        send.assert_called_once()
+
+    async def test_network_error_retries_then_reraises_when_exhausted(self):
+        from bot import _send_with_retry
+        from telegram.error import NetworkError
+
+        send = AsyncMock(side_effect=NetworkError("down"))
+        with patch("bot._SEND_RETRY_BACKOFF", (0, 0, 0)):
+            with self.assertRaises(NetworkError):
+                await _send_with_retry(send)
+        self.assertEqual(send.call_count, 4)  # initial + 3 retries
+
 
 if __name__ == "__main__":
     unittest.main()
