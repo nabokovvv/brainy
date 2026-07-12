@@ -17,6 +17,7 @@ import httpx
 import telegram.error
 from telegramify_markdown import ContentType, telegramify
 from telegram import (
+    BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
@@ -94,6 +95,7 @@ _DRAFT_TEXT_LIMIT = 4096
 # ---------------------------------------------------------------------------#
 #                               Constants                                  #
 # ---------------------------------------------------------------------------#
+ACTION_OPEN_SETTINGS = "ACTION_OPEN_SETTINGS"
 ACTION_SHOW_LANGUAGES = "ACTION_SHOW_LANGUAGES"
 ACTION_SET_LANGUAGE = "ACTION_SET_LANGUAGE"
 ACTION_TOGGLE_WEB = "ACTION_TOGGLE_WEB"
@@ -157,31 +159,51 @@ def _visible_link_preview(url: str | None = None) -> LinkPreviewOptions:
     )
 
 
-def get_language_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data["translator"]
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    translator.get_string("keep_language_button", lang),
-                    callback_data=f"{ACTION_SET_LANGUAGE}_{lang}",
-                ),
-                InlineKeyboardButton(
-                    translator.get_string("change_language_button", lang),
-                    callback_data=ACTION_SHOW_LANGUAGES,
-                ),
-            ]
-        ]
-    )
+# Native-name language labels for the settings hub and the language submenu.
+LANGUAGE_DISPLAY: dict[str, str] = {
+    "en": "🇬🇧 English",
+    "es": "🇪🇸 Español",
+    "ru": "🇷🇺 Русский",
+    "pt": "🇵🇹 Português",
+    "fr": "🇫🇷 Français",
+    "de": "🇩🇪 Deutsch",
+    "tr": "🇹🇷 Türkçe",
+    "id": "🇮🇩 Indonesia",
+}
+
+# Compact, language-neutral labels for memory budgets (footer + hub button).
+_MEMORY_SHORT: dict[int, str | None] = {0: None, 1000: "~1k", 10000: "~10k"}
 
 
-def get_all_languages_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data["translator"]
-    keyboard = [
-        [InlineKeyboardButton(lang.upper(), callback_data=f"{ACTION_SET_LANGUAGE}_{lang}")]
-        for lang in translator.supported_languages
+def _memory_short_label(translator, lang: str, budget: int) -> str:
+    return _MEMORY_SHORT.get(budget) or translator.get_string("memory_short_off", lang)
+
+
+def _back_row(translator, lang: str) -> list[InlineKeyboardButton]:
+    return [
+        InlineKeyboardButton(
+            translator.get_string("back_button", lang), callback_data=ACTION_OPEN_SETTINGS
+        )
     ]
-    return InlineKeyboardMarkup(keyboard)
+
+
+def get_all_languages_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> InlineKeyboardMarkup:
+    translator = context.application.bot_data["translator"]
+    codes = translator.supported_languages
+    rows = [
+        [
+            InlineKeyboardButton(
+                ("✓ " if code == lang else "") + LANGUAGE_DISPLAY.get(code, code.upper()),
+                callback_data=f"{ACTION_SET_LANGUAGE}_{code}",
+            )
+            for code in codes[i : i + 2]
+        ]
+        for i in range(0, len(codes), 2)
+    ]
+    rows.append(_back_row(translator, lang))
+    return InlineKeyboardMarkup(rows)
 
 
 def _current_route_intent(context: ContextTypes.DEFAULT_TYPE) -> RouteIntent:
@@ -234,14 +256,6 @@ async def _persist_settings(
         logger.error("Settings persistence failed type=%s", type(exc).__name__)
 
 
-def get_route_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
-    translator = context.application.bot_data["translator"]
-    key = "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(translator.get_string(key, lang), callback_data=ACTION_TOGGLE_WEB)]]
-    )
-
-
 def _current_persona(context: ContextTypes.DEFAULT_TYPE) -> str:
     persona = context.chat_data.get("persona", DEFAULT_PERSONA)
     return persona if is_valid_persona(persona) else DEFAULT_PERSONA
@@ -254,58 +268,103 @@ def _current_memory_budget(context: ContextTypes.DEFAULT_TYPE) -> int:
 
 def get_memory_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
     translator = context.application.bot_data["translator"]
-    buttons = [
-        InlineKeyboardButton(
-            translator.get_string(BUDGET_LABEL_KEY[budget], lang),
-            callback_data=f"{ACTION_SET_MEMORY}_{budget}",
-        )
+    current = _current_memory_budget(context)
+    rows = [
+        [
+            InlineKeyboardButton(
+                ("✓ " if budget == current else "")
+                + translator.get_string(BUDGET_LABEL_KEY[budget], lang),
+                callback_data=f"{ACTION_SET_MEMORY}_{budget}",
+            )
+        ]
         for budget in MEMORY_BUDGET_OPTIONS
     ]
-    return InlineKeyboardMarkup([[button] for button in buttons])
-
-
-async def _send_memory_selector(
-    context: ContextTypes.DEFAULT_TYPE, chat_id: int, lang: str
-) -> None:
-    translator = context.application.bot_data["translator"]
-    text = translator.get_string("memory_prompt", lang)
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        reply_markup=get_memory_keyboard(context, lang),
-    )
+    rows.append(_back_row(translator, lang))
+    return InlineKeyboardMarkup(rows)
 
 
 def get_persona_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
     translator = context.application.bot_data["translator"]
+    current = _current_persona(context)
     rows = [
         [
             InlineKeyboardButton(
-                translator.get_string(f"persona_{name}", lang),
+                ("✓ " if name == current else "")
+                + translator.get_string(f"persona_{name}", lang),
                 callback_data=f"{ACTION_SET_PERSONA}_{name}",
             )
-            for name in ALL_PERSONAS[i : i + 2]
         ]
-        for i in range(0, len(ALL_PERSONAS), 2)
+        for name in ALL_PERSONAS
     ]
+    rows.append(_back_row(translator, lang))
     return InlineKeyboardMarkup(rows)
 
 
-async def _send_persona_selector(
-    context: ContextTypes.DEFAULT_TYPE, chat_id: int, lang: str
-) -> None:
-    translator = context.application.bot_data["translator"]
+def _persona_prompt_text(translator, lang: str) -> str:
     lines = [translator.get_string("persona_prompt", lang)]
     for name in ALL_PERSONAS:
         lines.append(
             f"• {translator.get_string(f'persona_{name}', lang)} — "
             f"{translator.get_string(f'persona_{name}_desc', lang)}"
         )
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="\n".join(lines),
-        reply_markup=get_persona_keyboard(context, lang),
+    return "\n".join(lines)
+
+
+def get_settings_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> InlineKeyboardMarkup:
+    """One-message settings hub: every row shows the current value and opens
+    either a toggle (web) or a submenu edited in place."""
+
+    translator = context.application.bot_data["translator"]
+    web_key = (
+        "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
     )
+    persona_label = translator.get_string(f"persona_{_current_persona(context)}", lang)
+    memory_label = _memory_short_label(translator, lang, _current_memory_budget(context))
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translator.get_string(web_key, lang), callback_data=ACTION_TOGGLE_WEB
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translator.get_string(
+                        "settings_language_button",
+                        lang,
+                        value=LANGUAGE_DISPLAY.get(lang, lang.upper()),
+                    ),
+                    callback_data=ACTION_SHOW_LANGUAGES,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translator.get_string("settings_persona_button", lang, value=persona_label),
+                    callback_data=ACTION_SHOW_PERSONAS,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translator.get_string("settings_memory_button", lang, value=memory_label),
+                    callback_data=ACTION_SHOW_MEMORY,
+                )
+            ],
+        ]
+    )
+
+
+async def _render_settings_hub(query, context: ContextTypes.DEFAULT_TYPE, lang: str) -> None:
+    """Edit the settings message back to the hub view (idempotent)."""
+
+    translator = context.application.bot_data["translator"]
+    try:
+        await query.edit_message_text(
+            text=translator.get_string("settings_title", lang),
+            reply_markup=get_settings_keyboard(context, lang),
+        )
+    except BadRequest:
+        # "Message is not modified" when nothing changed — safe to ignore.
+        pass
 
 
 def _should_show_feedback_keyboard(context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -357,6 +416,34 @@ def get_web_answer_keyboard(
     )
 
 
+def _short_model_name(name: str) -> str:
+    """Compact model label for the footer: drop registry paths, cap length."""
+
+    base = name.split("/")[-1]
+    return base if len(base) <= 24 else base[:23] + "…"
+
+
+def _reply_footer(
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    *,
+    icon: str,
+    seconds: float,
+    model_name: str,
+) -> str:
+    """One-line meta footer: mode+latency, model, memory budget, language.
+
+    Uses language-neutral tokens and a single leading emoji so it fits one
+    line on most phones.
+    """
+
+    mem = _MEMORY_SHORT.get(_current_memory_budget(context)) or "off"
+    return (
+        f"{icon} {max(seconds, 0):.1f}s · {_short_model_name(model_name)}"
+        f" · 🧠 {mem} · {lang.upper()}"
+    )
+
+
 def _capture_request_snapshot(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -377,6 +464,8 @@ def _capture_request_snapshot(
 #                               Commands                                     #
 # ---------------------------------------------------------------------------#
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """One welcome message with the settings hub attached — no message stack."""
+
     chat_id = update.effective_chat.id
     await _ensure_settings_loaded(context, chat_id)
     user_lang = context.chat_data.get("language")
@@ -392,50 +481,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             language=user_lang,
             web_enabled=_current_route_intent(context) is RouteIntent.WEB,
         )
-
         text = translator.get_string("welcome_new_user", user_lang)
-        keyboard = get_language_keyboard(context, user_lang)
-        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
-        await _send_persona_selector(context, chat_id, user_lang)
-        await _send_memory_selector(context, chat_id, user_lang)
     else:
-        status_key = (
-            "web_status_on"
-            if _current_route_intent(context) is RouteIntent.WEB
-            else "web_status_off"
-        )
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=translator.get_string(status_key, user_lang),
-            reply_markup=get_route_keyboard(context, user_lang),
-        )
-        await _send_persona_selector(context, chat_id, user_lang)
-        await _send_memory_selector(context, chat_id, user_lang)
+        text = translator.get_string("welcome_back", user_lang)
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=get_settings_keyboard(context, user_lang),
+    )
 
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Re-open the persistent route and language controls on demand."""
+    """Open the single-message settings hub on demand."""
 
     chat_id = update.effective_chat.id
     await _ensure_settings_loaded(context, chat_id)
     lang = context.chat_data.get("language", "en")
     translator = context.application.bot_data["translator"]
-    status_key = (
-        "web_status_on" if _current_route_intent(context) is RouteIntent.WEB else "web_status_off"
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=translator.get_string("settings_title", lang),
+        reply_markup=get_settings_keyboard(context, lang),
     )
 
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=translator.get_string(status_key, lang),
-        reply_markup=get_route_keyboard(context, lang),
-    )
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=translator.get_string("language_selection_prompt", lang),
-        reply_markup=get_all_languages_keyboard(context),
-    )
-    await _send_persona_selector(context, chat_id, lang)
-    await _send_memory_selector(context, chat_id, lang)
+
+async def new_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/new and /reset: drop conversation context, keep all settings."""
+
+    chat_id = update.effective_chat.id
+    await _ensure_settings_loaded(context, chat_id)
+    lang = context.chat_data.get("language", "en")
+    translator = context.application.bot_data["translator"]
+    clear(chat_id)
+    user_message_buffers.pop(chat_id, None)
+    await update.message.reply_text(translator.get_string("new_chat_confirm", lang))
 
 
 # ---------------------------------------------------------------------------#
@@ -506,9 +586,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         return
 
+    if action == ACTION_OPEN_SETTINGS:
+        await query.answer()
+        await _render_settings_hub(query, context, lang)
+        return
+
     if action == ACTION_SHOW_PERSONAS:
+        await query.answer()
         await query.edit_message_text(
-            text=translator.get_string("persona_prompt", lang),
+            text=_persona_prompt_text(translator, lang),
             reply_markup=get_persona_keyboard(context, lang),
         )
         return
@@ -520,16 +606,18 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         context.chat_data["persona"] = new_persona
         await _persist_settings(context, chat_id, persona=new_persona)
-        confirm_text = translator.get_string(
-            "persona_set", lang, persona_name=translator.get_string(f"persona_{new_persona}", lang)
+        await query.answer(
+            text=translator.get_string(
+                "persona_set",
+                lang,
+                persona_name=translator.get_string(f"persona_{new_persona}", lang),
+            )
         )
-        await query.edit_message_text(
-            text=confirm_text,
-            reply_markup=get_persona_keyboard(context, lang),
-        )
+        await _render_settings_hub(query, context, lang)
         return
 
     if action == ACTION_SHOW_MEMORY:
+        await query.answer()
         await query.edit_message_text(
             text=translator.get_string("memory_prompt", lang),
             reply_markup=get_memory_keyboard(context, lang),
@@ -550,37 +638,31 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if new_budget == 0:
             clear(chat_id)
         await _persist_settings(context, chat_id, memory_budget=new_budget)
-        confirm_text = translator.get_string(
-            "memory_set",
-            lang,
-            memory_label=translator.get_string(BUDGET_LABEL_KEY[new_budget], lang),
+        await query.answer(
+            text=translator.get_string(
+                "memory_set",
+                lang,
+                memory_label=translator.get_string(BUDGET_LABEL_KEY[new_budget], lang),
+            )
         )
-        await query.edit_message_text(
-            text=confirm_text,
-            reply_markup=get_memory_keyboard(context, lang),
-        )
+        await _render_settings_hub(query, context, lang)
         return
 
     await query.answer()
 
     if action == ACTION_SHOW_LANGUAGES:
         text = translator.get_string("language_selection_prompt", lang)
-        await query.edit_message_text(text=text, reply_markup=get_all_languages_keyboard(context))
+        await query.edit_message_text(
+            text=text, reply_markup=get_all_languages_keyboard(context, lang)
+        )
 
     elif action.startswith(f"{ACTION_SET_LANGUAGE}_"):
         new_lang = action.replace(f"{ACTION_SET_LANGUAGE}_", "")
+        if new_lang not in translator.supported_languages:
+            return
         context.chat_data["language"] = new_lang
         await _persist_settings(context, chat_id, language=new_lang)
-        status_key = (
-            "web_status_on"
-            if _current_route_intent(context) is RouteIntent.WEB
-            else "web_status_off"
-        )
-        text = translator.get_string(status_key, new_lang)
-        await query.edit_message_text(
-            text=text,
-            reply_markup=get_route_keyboard(context, new_lang),
-        )
+        await _render_settings_hub(query, context, new_lang)
 
     elif action == ACTION_TOGGLE_WEB:
         context.chat_data["web_enabled"] = _current_route_intent(context) is RouteIntent.LOCAL
@@ -589,15 +671,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             chat_id,
             web_enabled=context.chat_data["web_enabled"],
         )
-        status_key = (
-            "web_status_on"
-            if _current_route_intent(context) is RouteIntent.WEB
-            else "web_status_off"
-        )
-        await query.edit_message_text(
-            text=translator.get_string(status_key, lang),
-            reply_markup=get_route_keyboard(context, lang),
-        )
+        await _render_settings_hub(query, context, lang)
 
     elif action in {"web", "deep_research", "fast_reply", "deep_search", "deepseek_r1"}:
         # Old inline keyboards may survive a deploy. Preserve their route intent.
@@ -607,11 +681,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             chat_id,
             web_enabled=context.chat_data["web_enabled"],
         )
-        status_key = "web_status_on" if context.chat_data["web_enabled"] else "web_status_off"
-        await query.edit_message_text(
-            text=translator.get_string(status_key, lang),
-            reply_markup=get_route_keyboard(context, lang),
-        )
+        await _render_settings_hub(query, context, lang)
 
 
 # ---------------------------------------------------------------------------#
@@ -855,7 +925,13 @@ async def fast_reply_handler(
             ChatMessage(role="assistant", content=final_answer),
         )
 
-        latency_badge = f"⚡ {max(result.latency_ms, 0) / 1000:.1f}s"
+        latency_badge = _reply_footer(
+            context,
+            lang,
+            icon="⚡",
+            seconds=result.latency_ms / 1000,
+            model_name=result.model.name,
+        )
 
         feedback_keyboard = None
         if _should_show_feedback_keyboard(context):
@@ -1007,7 +1083,13 @@ async def grounded_web_reply_handler(
         )
 
         elapsed_s = time.perf_counter() - started_at
-        badge = f"{'🔎' if deep else '🌐'} {max(elapsed_s, 0):.1f}s"
+        badge = _reply_footer(
+            context,
+            language,
+            icon="🔎" if deep else "🌐",
+            seconds=elapsed_s,
+            model_name=result.model.name,
+        )
         top_citations = synthesizer.select_citations(bundle, 5 if deep else 3)
 
         # The chunk text is still untrusted web content, so sanitize the model
@@ -1493,6 +1575,7 @@ async def main_async() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("settings", settings))
+    application.add_handler(CommandHandler(["new", "reset"], new_chat))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
@@ -1506,6 +1589,18 @@ async def main_async() -> None:
     try:
         await application.initialize()
         application_initialized = True
+        # Populate Telegram's "/" command menu. Best-effort: the bot works
+        # without it, so a transient API failure must not block startup.
+        try:
+            await application.bot.set_my_commands(
+                [
+                    BotCommand("new", "New chat — clear the context"),
+                    BotCommand("settings", "Web, language, persona, memory"),
+                    BotCommand("start", "Restart the bot"),
+                ]
+            )
+        except telegram.error.TelegramError as exc:
+            logger.warning("set_my_commands failed type=%s", type(exc).__name__)
         await application.start()
 
         while True:

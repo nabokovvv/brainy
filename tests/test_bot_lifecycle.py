@@ -33,6 +33,7 @@ class _TelegramError(Exception):
 def _load_bot_with_telegram_stub():
     telegram = types.ModuleType("telegram")
     telegram.__path__ = []
+    telegram.BotCommand = _DummyTelegramObject
     telegram.InlineKeyboardButton = _DummyTelegramObject
     telegram.InlineKeyboardMarkup = _DummyTelegramObject
     telegram.InputFile = _DummyTelegramObject
@@ -264,15 +265,9 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         await bot.settings(update, context)
 
-        self.assertEqual(len(telegram_bot.sent), 4)
-        self.assertEqual(telegram_bot.sent[0][1]["text"], "web_status_on:ru")
-        self.assertEqual(telegram_bot.sent[1][1]["text"], "language_selection_prompt:ru")
-        self.assertTrue(telegram_bot.sent[2][1]["text"].startswith("persona_prompt:ru"))
-        self.assertTrue(telegram_bot.sent[3][1]["text"].startswith("memory_prompt:ru"))
+        self.assertEqual(len(telegram_bot.sent), 1)
+        self.assertEqual(telegram_bot.sent[0][1]["text"], "settings_title:ru")
         self.assertIsNotNone(telegram_bot.sent[0][1]["reply_markup"])
-        self.assertIsNotNone(telegram_bot.sent[1][1]["reply_markup"])
-        self.assertIsNotNone(telegram_bot.sent[2][1]["reply_markup"])
-        self.assertIsNotNone(telegram_bot.sent[3][1]["reply_markup"])
 
     async def test_progress_draft_uses_nonzero_id_and_empty_thinking_text(self) -> None:
         telegram_bot = _Bot()
@@ -526,7 +521,7 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(callback.answered)
         self.assertTrue(context.chat_data["web_enabled"])
-        self.assertEqual(callback.edits[0][0], "web_status_on:en")
+        self.assertEqual(callback.edits[0][0], "settings_title:en")
 
     async def test_voice_failure_replies_and_cleans_status(self) -> None:
         chat_id = 11
