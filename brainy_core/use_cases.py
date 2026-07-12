@@ -15,13 +15,16 @@ def build_fast_chat_request(
     persona: str = DEFAULT_PERSONA,
     history: Sequence[ChatMessage] = (),
     max_output_tokens: int = 600,
+    images: Sequence[str] = (),
 ) -> ChatRequest:
     """Build the direct local-chat request without routing or provider work.
 
     ``history`` is a sequence of prior user/assistant turns (whole messages,
     never split) appended after the system prompt and before the current user
     turn. Callers are responsible for bounding its size (see
-    ``brainy_core.memory``).
+    ``brainy_core.memory``). ``images`` are base64-encoded image bytes attached
+    to the current user turn only - history turns never carry images forward,
+    keeping repeated round-trips bounded.
     """
 
     system_prompt = with_persona(
@@ -36,7 +39,7 @@ def build_fast_chat_request(
         messages=(
             ChatMessage(role="system", content=system_prompt),
             *tuple(history),
-            ChatMessage(role="user", content=query),
+            ChatMessage(role="user", content=query, images=tuple(images)),
         ),
         max_output_tokens=max_output_tokens,
         temperature=1,

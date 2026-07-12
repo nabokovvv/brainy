@@ -146,9 +146,7 @@ class OllamaProvider:
     async def _stream_chat_operation(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
         payload: Dict[str, Any] = {
             "model": self._model.name,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in request.messages
-            ],
+            "messages": [_message_payload(message) for message in request.messages],
             "max_tokens": request.max_output_tokens,
             "temperature": request.temperature,
             "reasoning_effort": "none",
@@ -214,9 +212,7 @@ class OllamaProvider:
     async def _chat_operation(self, request: ChatRequest) -> ChatResult:
         payload: Dict[str, Any] = {
             "model": self._model.name,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in request.messages
-            ],
+            "messages": [_message_payload(message) for message in request.messages],
             "max_tokens": request.max_output_tokens,
             "temperature": request.temperature,
             # Gemma 4 can emit a long hidden reasoning trace by default. Brainy's
@@ -311,6 +307,24 @@ class OllamaProvider:
         if result is None:
             raise ProviderResponseError(_PROVIDER_NAME)
         return result
+
+
+def _message_payload(message: Any) -> Dict[str, Any]:
+    """Render one ``ChatMessage`` as an OpenAI-style chat message.
+
+    Telegram photos are always delivered as JPEG, the only image kind this
+    adapter ever receives, so the data URI mime type is fixed rather than
+    detected.
+    """
+
+    if not message.images:
+        return {"role": message.role, "content": message.content}
+    parts: list[Dict[str, Any]] = []
+    if message.content:
+        parts.append({"type": "text", "text": message.content})
+    for image in message.images:
+        parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}})
+    return {"role": message.role, "content": parts}
 
 
 def _normalize_base_url(base_url: str, *, allow_remote: bool) -> Tuple[str, bool]:

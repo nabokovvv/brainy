@@ -32,6 +32,7 @@ EXPECTED_KEYS = {
     "feedback_recorded_up",
     "feedback_thumbs_down_button",
     "feedback_thumbs_up_button",
+    "image_no_caption_prompt",
     "keep_language_button",
     "language_selection_prompt",
     "language_updated",

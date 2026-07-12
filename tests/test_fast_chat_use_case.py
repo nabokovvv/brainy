@@ -20,6 +20,19 @@ class FastChatUseCaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-empty"):
             build_fast_chat_request("   ", "en")
 
+    def test_images_attach_to_the_current_turn_only(self) -> None:
+        history = (
+            ChatMessage(role="user", content="prev question"),
+            ChatMessage(role="assistant", content="prev answer"),
+        )
+        request = build_fast_chat_request(
+            "What is in this photo?", "en", history=history, images=("b64data",)
+        )
+
+        self.assertEqual(request.messages[-1].images, ("b64data",))
+        self.assertEqual(request.messages[1].images, ())
+        self.assertEqual(request.messages[2].images, ())
+
     def test_history_is_inserted_between_system_and_current_turn(self) -> None:
         history = (
             ChatMessage(role="user", content="prev question"),

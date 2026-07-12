@@ -103,6 +103,67 @@ class OllamaProviderTests(unittest.IsolatedAsyncioTestCase):
         await provider.aclose()
         self.assertFalse(client.is_closed, "The provider must not close a borrowed shared client.")
 
+    async def test_chat_sends_multimodal_content_when_message_has_images(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "model": "gemma-test:latest",
+                    "choices": [{"message": {"content": "Red"}, "finish_reason": "stop"}],
+                },
+            )
+
+        provider, _ = self.make_provider(handler)
+        request = ChatRequest(
+            messages=(
+                ChatMessage(role="user", content="What color is this?", images=("YmFzZTY0",)),
+            )
+        )
+
+        result = await provider.chat(request)
+
+        self.assertEqual(result.text, "Red")
+        sent = json.loads(requests[0].content)
+        self.assertEqual(
+            sent["messages"][0],
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What color is this?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/jpeg;base64,YmFzZTY0"},
+                    },
+                ],
+            },
+        )
+
+    async def test_chat_omits_text_part_when_image_message_has_no_caption(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "Red"}}]},
+            )
+
+        provider, _ = self.make_provider(handler)
+        request = ChatRequest(
+            messages=(ChatMessage(role="user", content="", images=("YmFzZTY0",)),)
+        )
+
+        await provider.chat(request)
+
+        sent = json.loads(requests[0].content)
+        self.assertEqual(
+            sent["messages"][0]["content"],
+            [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,YmFzZTY0"}}],
+        )
+
     async def test_stream_chat_yields_deltas_and_normalized_final_result(self) -> None:
         requests: list[httpx.Request] = []
 

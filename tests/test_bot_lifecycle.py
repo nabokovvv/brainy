@@ -420,7 +420,7 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         request = bot.Request(update, context, 7, "question", "ru", RouteIntent.LOCAL)
         await queue.put(1, request)
 
-        async def fake_handler(update, context, query, *, language=None) -> None:
+        async def fake_handler(update, context, query, *, language=None, images=()) -> None:
             captured.append(language)
             called.set()
 

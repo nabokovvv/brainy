@@ -6,11 +6,15 @@ construction. Application use cases build the messages; adapters only transport 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import AsyncIterator, Literal, Optional, Protocol, Tuple, runtime_checkable
 
 MessageRole = Literal["system", "user", "assistant"]
+
+# Bounds one message's image payload so a single Telegram photo message cannot
+# balloon into an unbounded multimodal request.
+MAX_IMAGES_PER_MESSAGE = 4
 
 
 class ProviderErrorCode(str, Enum):
@@ -25,16 +29,32 @@ class ProviderErrorCode(str, Enum):
 
 @dataclass(frozen=True)
 class ChatMessage:
-    """A text-only chat message understood by every inference provider."""
+    """A chat message understood by every inference provider.
+
+    ``images`` holds raw base64-encoded image bytes (no ``data:`` URI prefix -
+    providers add whatever wrapper their transport needs). Providers that
+    cannot accept images should ignore this field or reject the request;
+    ``ChatMessage`` itself only enforces the bound on how many a single
+    message may carry.
+    """
 
     role: MessageRole
     content: str
+    images: Tuple[str, ...] = field(default=())
 
     def __post_init__(self) -> None:
         if self.role not in {"system", "user", "assistant"}:
             raise ValueError("Unsupported chat message role.")
-        if not isinstance(self.content, str) or not self.content.strip():
+        if not isinstance(self.content, str):
+            raise ValueError("Chat message content must be text.")
+        images = tuple(self.images)
+        if len(images) > MAX_IMAGES_PER_MESSAGE:
+            raise ValueError(f"A message may carry at most {MAX_IMAGES_PER_MESSAGE} images.")
+        if not all(isinstance(image, str) and image.strip() for image in images):
+            raise ValueError("images must be non-empty base64 strings.")
+        if not self.content.strip() and not images:
             raise ValueError("Chat message content must be non-empty text.")
+        object.__setattr__(self, "images", images)
 
 
 @dataclass(frozen=True)

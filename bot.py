@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import itertools
 import logging
@@ -128,6 +129,7 @@ class Request:
     query: str
     language: str
     route_intent: RouteIntent
+    images: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------#
@@ -289,8 +291,7 @@ def get_persona_keyboard(context: ContextTypes.DEFAULT_TYPE, lang: str) -> Inlin
     rows = [
         [
             InlineKeyboardButton(
-                ("✓ " if name == current else "")
-                + translator.get_string(f"persona_{name}", lang),
+                ("✓ " if name == current else "") + translator.get_string(f"persona_{name}", lang),
                 callback_data=f"{ACTION_SET_PERSONA}_{name}",
             )
         ]
@@ -861,6 +862,7 @@ async def fast_reply_handler(
     query: str,
     *,
     language: str | None = None,
+    images: tuple[str, ...] = (),
 ):
     lang = language or context.chat_data.get("language", "en")
     chat_id = update.effective_chat.id
@@ -885,7 +887,11 @@ async def fast_reply_handler(
         async with llm_semaphore:
             history = get_history(chat_id, _current_memory_budget(context))
             request = build_fast_chat_request(
-                query, lang, persona=_current_persona(context), history=history
+                query,
+                lang,
+                persona=_current_persona(context),
+                history=history,
+                images=images,
             )
             stream_chat = getattr(provider, "stream_chat", None)
             if callable(stream_chat):
@@ -1192,7 +1198,9 @@ async def worker(name: str, queue: StablePriorityQueue, app_data: dict):
                 if route_intent is RouteIntent.WEB:
                     await grounded_web_reply_handler(update, context, query, language=lang)
                 else:
-                    await fast_reply_handler(update, context, query, language=lang)
+                    await fast_reply_handler(
+                        update, context, query, language=lang, images=request.images
+                    )
 
         except asyncio.CancelledError:
             raise
@@ -1253,6 +1261,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         name=f"process-msg-{chat_id}",
     )
     user_job_trackers[chat_id] = new_job
+
+
+# Telegram already re-encodes photos as JPEG well under this size; it guards
+# against a doctored client sending an oversized file_size-less payload.
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    await _ensure_settings_loaded(context, chat_id)
+    if "language" not in context.chat_data:
+        await start(update, context)
+        return
+
+    lang = context.chat_data.get("language", "en")
+    translator = context.application.bot_data["translator"]
+
+    photo = update.message.photo[-1]
+    if photo.file_size and photo.file_size > _MAX_IMAGE_BYTES:
+        await update.message.reply_text(translator.get_string("error_generic", lang))
+        return
+
+    try:
+        photo_file = await photo.get_file()
+        image_buffer = io.BytesIO()
+        await photo_file.download_to_memory(image_buffer)
+        image_bytes = image_buffer.getvalue()
+        if not image_bytes or len(image_bytes) > _MAX_IMAGE_BYTES:
+            raise ValueError("Downloaded photo is empty or oversized.")
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    except Exception as exc:
+        logger.warning("Photo download failed type=%s", type(exc).__name__)
+        await update.message.reply_text(translator.get_string("error_generic", lang))
+        return
+
+    caption = (update.message.caption or "").strip()
+    query_text = caption or translator.get_string("image_no_caption_prompt", lang)
+
+    # Photos skip the text debounce buffer (one photo is already one complete
+    # turn) and go straight to the local vision-capable model; Web ON's search
+    # synthesis has no use for an attached image.
+    request_queue = context.application.bot_data["request_queue"]
+    request = Request(
+        update=update,
+        context=context,
+        chat_id=chat_id,
+        query=query_text,
+        language=lang,
+        route_intent=RouteIntent.LOCAL,
+        images=(image_b64,),
+    )
+    await request_queue.put(1, request)
 
 
 # ---------------------------------------------------------------------------#
@@ -1579,6 +1639,7 @@ async def main_async() -> None:
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
 
     workers = [
         asyncio.create_task(worker(f"Worker-{i + 1}", request_queue, application.bot_data))

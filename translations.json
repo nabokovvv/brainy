@@ -63,7 +63,8 @@
     "memory_small": "🐇 ~1000 characters",
     "memory_large": "🐢 ~10000 characters",
     "memory_invalid": "Unknown memory setting.",
-    "memory_set": "Memory: {memory_label}"
+    "memory_set": "Memory: {memory_label}",
+    "image_no_caption_prompt": "Describe what you see in this image."
   },
   "es": {
     "welcome_new_user": "👋 ¡Hola! Soy Brainy — un asistente de IA gratuito con búsqueda web.\n\nEnvíame un mensaje — los mensajes de voz también funcionan. Tu configuración está abajo; toca para cambiarla.\n\n/new — empezar un chat nuevo\n/settings — abrir ajustes",
@@ -129,7 +130,8 @@
     "memory_small": "🐇 ~1000 caracteres",
     "memory_large": "🐢 ~10000 caracteres",
     "memory_invalid": "Configuración de memoria desconocida.",
-    "memory_set": "Memoria: {memory_label}"
+    "memory_set": "Memoria: {memory_label}",
+    "image_no_caption_prompt": "Describe lo que ves en esta imagen."
   },
   "ru": {
     "welcome_new_user": "👋 Привет! Я Brainy — бесплатный ИИ-ассистент с веб-поиском.\n\nПросто напишите сообщение — голосовые тоже работают. Ваши настройки ниже, нажмите, чтобы изменить.\n\n/new — начать новый чат\n/settings — настройки",
@@ -195,7 +197,8 @@
     "memory_small": "🐇 ~1000 символов",
     "memory_large": "🐢 ~10000 символов",
     "memory_invalid": "Неизвестная настройка памяти.",
-    "memory_set": "Память: {memory_label}"
+    "memory_set": "Память: {memory_label}",
+    "image_no_caption_prompt": "Опиши, что ты видишь на этом изображении."
   },
   "pt": {
     "welcome_new_user": "👋 Olá! Sou o Brainy — um assistente de IA gratuito com pesquisa na web.\n\nÉ só me enviar uma mensagem — voz também funciona. Suas configurações estão abaixo; toque para alterar.\n\n/new — começar um chat novo\n/settings — abrir configurações",
@@ -261,7 +264,8 @@
     "memory_small": "🐇 ~1000 caracteres",
     "memory_large": "🐢 ~10000 caracteres",
     "memory_invalid": "Configuração de memória desconhecida.",
-    "memory_set": "Memória: {memory_label}"
+    "memory_set": "Memória: {memory_label}",
+    "image_no_caption_prompt": "Descreva o que você vê nesta imagem."
   },
   "fr": {
     "welcome_new_user": "👋 Salut ! Je suis Brainy — un assistant IA gratuit avec recherche web.\n\nEnvoyez-moi simplement un message — les messages vocaux fonctionnent aussi. Vos réglages sont ci-dessous, touchez pour modifier.\n\n/new — nouveau chat\n/settings — réglages",
@@ -327,7 +331,8 @@
     "memory_small": "🐇 ~1000 caractères",
     "memory_large": "🐢 ~10000 caractères",
     "memory_invalid": "Paramètre de mémoire inconnu.",
-    "memory_set": "Mémoire : {memory_label}"
+    "memory_set": "Mémoire : {memory_label}",
+    "image_no_caption_prompt": "Décris ce que tu vois sur cette image."
   },
   "de": {
     "welcome_new_user": "👋 Hallo! Ich bin Brainy — ein kostenloser KI-Assistent mit Websuche.\n\nSchick mir einfach eine Nachricht — Sprachnachrichten funktionieren auch. Deine Einstellungen sind unten; tippe zum Ändern.\n\n/new — neuen Chat starten\n/settings — Einstellungen",
@@ -393,7 +398,8 @@
     "memory_small": "🐇 ~1000 Zeichen",
     "memory_large": "🐢 ~10000 Zeichen",
     "memory_invalid": "Unbekannte Speichereinstellung.",
-    "memory_set": "Speicher: {memory_label}"
+    "memory_set": "Speicher: {memory_label}",
+    "image_no_caption_prompt": "Beschreibe, was du auf diesem Bild siehst."
   },
   "tr": {
     "welcome_new_user": "👋 Merhaba! Ben Brainy — web aramalı ücretsiz bir yapay zekâ asistanı.\n\nBana bir mesaj gönder — sesli mesajlar da çalışır. Ayarların aşağıda; değiştirmek için dokun.\n\n/new — yeni sohbet başlat\n/settings — ayarlar",
@@ -459,7 +465,8 @@
     "memory_small": "🐇 ~1000 karakter",
     "memory_large": "🐢 ~10000 karakter",
     "memory_invalid": "Bilinmeyen bellek ayarı.",
-    "memory_set": "Bellek: {memory_label}"
+    "memory_set": "Bellek: {memory_label}",
+    "image_no_caption_prompt": "Bu görselde ne gördüğünü anlat."
   },
   "id": {
     "welcome_new_user": "👋 Halo! Saya Brainy — asisten AI gratis dengan pencarian web.\n\nCukup kirim pesan — pesan suara juga bisa. Pengaturan Anda ada di bawah; ketuk untuk mengubah.\n\n/new — mulai chat baru\n/settings — pengaturan",
@@ -525,6 +532,7 @@
     "memory_small": "🐇 ~1000 karakter",
     "memory_large": "🐢 ~10000 karakter",
     "memory_invalid": "Pengaturan memori tidak dikenal.",
-    "memory_set": "Memori: {memory_label}"
+    "memory_set": "Memori: {memory_label}",
+    "image_no_caption_prompt": "Jelaskan apa yang kamu lihat di gambar ini."
   }
 }
