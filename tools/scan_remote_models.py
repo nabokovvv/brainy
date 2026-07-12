@@ -37,7 +37,7 @@ NVIDIA_MULTILINGUAL_CANDIDATES = (
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=("nvidia", "openrouter"), required=True)
+    parser.add_argument("--provider", action="append", choices=("nvidia", "openrouter"), required=True)
     parser.add_argument("--canary", action="store_true")
     parser.add_argument("--model", action="append", default=[])
     parser.add_argument("--max-models", type=int, default=3, choices=(1, 2, 3))
@@ -65,8 +65,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timeout",
         type=float,
-        default=60,
-        help="Per-request timeout in seconds; free-tier models routinely need more than 30.",
+        default=120,
+        help="Per-request timeout in seconds; free-tier models routinely run close to the cap.",
     )
     parser.add_argument(
         "--rpm",
@@ -87,82 +87,92 @@ def _env_int(name: str, default: int) -> int:
 async def main() -> int:
     args = _parser().parse_args()
     async with httpx.AsyncClient() as client:
-        if args.provider == "openrouter":
-            candidates = await _openrouter_candidates(client, args.catalog_path)
-        else:
-            candidates = await _nvidia_candidates(client)
-
-        selected = tuple(args.model or candidates[: args.max_models])
-        if args.canary and not args.model:
-            print(json.dumps({"error": "explicit_model_required_for_canary"}))
-            return 2
-        unknown = sorted(set(selected) - set(candidates))
-        if unknown:
-            print(json.dumps({"error": "models_not_eligible", "model_ids": unknown}))
-            return 2
-        if not args.canary:
-            print(
-                json.dumps(
-                    {
-                        "provider": args.provider,
-                        "lifecycle": "eligible",
-                        "multilingual_canary_required": True,
-                        "model_ids": list(candidates),
-                    },
-                    sort_keys=True,
+        candidates_by_provider = {}
+        for prov in args.provider:
+            if prov == "openrouter":
+                candidates_by_provider["openrouter"] = await _openrouter_candidates(
+                    client, args.catalog_path
                 )
-            )
+            else:
+                candidates_by_provider["nvidia"] = await _nvidia_candidates(client)
+
+        if not args.canary:
+            results = {}
+            for prov in args.provider:
+                results[prov] = {
+                    "lifecycle": "eligible",
+                    "multilingual_canary_required": True,
+                    "model_ids": list(candidates_by_provider[prov]),
+                }
+            print(json.dumps(results, sort_keys=True))
             return 0
 
-        key_name = "NVIDIA_API_KEY" if args.provider == "nvidia" else "OPENROUTER_API_KEY"
-        api_key = os.environ.get(key_name, "").strip()
-        if not api_key:
-            print(json.dumps({"error": "missing_api_key", "provider": args.provider}))
+        if not args.model:
+            print(json.dumps({"error": "explicit_model_required_for_canary"}))
             return 2
-        limit = (
-            args.nvidia_daily_limit if args.provider == "nvidia" else args.openrouter_daily_limit
-        )
-        base_url = NVIDIA_BASE_URL if args.provider == "nvidia" else OPENROUTER_BASE_URL
-        reports = []
-        rate_budget = MinuteRateBudget(args.rpm)
-        for model_id in selected:
-            provider = OpenAICompatibleRemoteProvider(
-                provider_name=args.provider,
-                base_url=base_url,
-                api_key=api_key,
-                model=model_id,
-                client=client,
-                budget=DailyRequestBudget(
-                    args.budget_path,
-                    provider=args.provider,
-                    limit=limit,
-                ),
-                rate_budget=rate_budget,
-                timeout_seconds=args.timeout,
-                # Free tiers answer 429 with multi-second Retry-After values;
-                # honor them instead of giving up after the default 2s cap.
-                retry_policy=RetryPolicy(max_attempts=3, max_delay_seconds=20),
-            )
-            result = await run_multilingual_canary(provider)
-            reports.append(
-                {
-                    "model_id": model_id,
-                    "lifecycle": "canary" if result.passed else "quarantine",
-                    "passed_languages": list(result.passed_languages),
-                    "completed_languages": list(result.completed_languages),
-                    "error_languages": sorted(
-                        set(result.languages) - set(result.completed_languages)
+
+        async def canary_provider(prov: str) -> dict:
+            if prov == "nvidia":
+                api_key = os.environ.get("NVIDIA_API_KEY", "").strip()
+                base_url = NVIDIA_BASE_URL
+                limit = args.nvidia_daily_limit
+            else:
+                api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+                base_url = OPENROUTER_BASE_URL
+                limit = args.openrouter_daily_limit
+            if not api_key:
+                return {"provider": prov, "error": "missing_api_key"}
+            candidates = candidates_by_provider[prov]
+            selected = tuple(m for m in args.model if m in candidates)
+            if not selected:
+                return {"provider": prov, "results": []}
+            reports: list[dict] = []
+            rate_budget = MinuteRateBudget(args.rpm)
+            for model_id in selected:
+                provider = OpenAICompatibleRemoteProvider(
+                    provider_name=prov,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model_id,
+                    client=client,
+                    budget=DailyRequestBudget(
+                        _prov_budget_path(args.budget_path, prov),
+                        provider=prov,
+                        limit=limit,
                     ),
-                    "error_codes": [
-                        {"language": language, "code": code}
-                        for language, code in result.error_codes
-                    ],
-                    "required_languages": list(result.languages),
-                    "median_latency_ms": round(result.median_latency_ms, 1),
-                }
-            )
-        print(json.dumps({"provider": args.provider, "results": reports}, sort_keys=True))
+                    rate_budget=rate_budget,
+                    timeout_seconds=args.timeout,
+                    retry_policy=RetryPolicy(max_attempts=3, max_delay_seconds=20),
+                )
+                result = await run_multilingual_canary(provider)
+                reports.append(
+                    {
+                        "model_id": model_id,
+                        "lifecycle": "canary" if result.passed else "quarantine",
+                        "passed_languages": list(result.passed_languages),
+                        "completed_languages": list(result.completed_languages),
+                        "error_languages": sorted(
+                            set(result.languages) - set(result.completed_languages)
+                        ),
+                        "error_codes": [
+                            {"language": language, "code": code}
+                            for language, code in result.error_codes
+                        ],
+                        "required_languages": list(result.languages),
+                        "median_latency_ms": round(result.median_latency_ms, 1),
+                    }
+                )
+            return {"provider": prov, "results": reports}
+
+        results = await asyncio.gather(*[canary_provider(prov) for prov in args.provider])
+        print(json.dumps({"results": results}, sort_keys=True))
         return 0
+
+
+def _prov_budget_path(base: str, prov: str) -> str:
+    p = os.path.expanduser(base)
+    root, ext = os.path.splitext(p)
+    return f"{root}-{prov}{ext}"
 
 
 async def _openrouter_candidates(client: httpx.AsyncClient, path: str) -> tuple[str, ...]:
