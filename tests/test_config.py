@@ -18,7 +18,6 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.search_backend, "disabled")
         self.assertEqual(settings.search_fallback_backend, "disabled")
         self.assertFalse(settings.web_enabled_default)
-        self.assertTrue(settings.telegram_rich_messages)
         self.assertEqual(settings.whisper_backend, "cpp")
 
     def test_python_whisper_is_an_explicit_development_override(self) -> None:
@@ -102,9 +101,9 @@ class SettingsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigurationError, message):
                     Settings.from_env({name: value})
 
-    def test_invalid_rich_messages_flag_is_rejected(self) -> None:
+    def test_invalid_web_enabled_default_flag_is_rejected(self) -> None:
         with self.assertRaisesRegex(ConfigurationError, "Invalid boolean"):
-            Settings.from_env({"TELEGRAM_RICH_MESSAGES": "sometimes"})
+            Settings.from_env({"WEB_ENABLED_DEFAULT": "sometimes"})
 
     def test_timeout_matches_provider_maximum(self) -> None:
         settings = Settings.from_env({"OLLAMA_TIMEOUT": "121"})

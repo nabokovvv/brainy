@@ -50,7 +50,6 @@ def _optional_env(value: str | None) -> str | None:
 @dataclass(frozen=True)
 class Settings:
     telegram_token: str | None
-    telegram_rich_messages: bool
     llm_client: str
     ollama_base_url: str
     ollama_model: str
@@ -78,7 +77,6 @@ class Settings:
         source = os.environ if env is None else env
         return cls(
             telegram_token=_optional_env(source.get("TELEGRAM_TOKEN")),
-            telegram_rich_messages=_env_bool(source.get("TELEGRAM_RICH_MESSAGES"), default=True),
             llm_client=source.get("LLM_CLIENT", "ollama").strip().lower(),
             ollama_base_url=source.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
             .strip()
@@ -203,7 +201,6 @@ SETTINGS = Settings.from_env()
 
 # Runtime constants consumed by the Telegram adapter.
 TELEGRAM_TOKEN = SETTINGS.telegram_token
-TELEGRAM_RICH_MESSAGES = SETTINGS.telegram_rich_messages
 OLLAMA_BASE_URL = SETTINGS.ollama_base_url
 OLLAMA_MODEL = SETTINGS.ollama_model
 OLLAMA_TIMEOUT = SETTINGS.ollama_timeout_seconds

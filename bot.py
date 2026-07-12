@@ -11,15 +11,15 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 import telegram.error
+from telegramify_markdown import ContentType, telegramify
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Update
 from telegram import InputFile
-from telegram.constants import ChatAction, ParseMode
+from telegram.constants import ChatAction
 from telegram.error import BadRequest
-from telegram.helpers import escape_markdown
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -63,7 +63,7 @@ from brainy_core.source_exploration import SourceExploration, SourceExplorationS
 from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
 from page_processor import PageFetcher
-from telegram_renderer import RichMessageRenderer, sanitize_untrusted_markdown
+from telegram_renderer import sanitize_untrusted_markdown
 from storage import AsyncUserSettingsRepo, DEFAULT_MEMORY_BUDGET, SQLiteUserSettingsRepo
 from utils import strip_think
 
@@ -123,158 +123,11 @@ class Request:
 
 
 # ---------------------------------------------------------------------------#
-# Markdown V2 Escaping (final)
+# Link detection (used for link previews)
 # ---------------------------------------------------------------------------#
 
-_SPECIAL = re.compile(r"([\\_\[\]\(\)~>#+\-=|{}\.!])")  # что экранируем всегда
-_SINGLE_STAR = re.compile(r"(?<!\*)\*(?!\*)")  # одиночная *
-_LIST_MARKER = re.compile(r"^( *)([-+*])(\s+)", re.MULTILINE)  # "- ", "+ ", "* "
-_QUOTE_MARKER = re.compile(r"^( *)(>+)(\s+)", re.MULTILINE)  # "> ", ">> ", …
-_NUMERIC_MARK = re.compile(r"^( *\d+)(\.)(\s+)", re.MULTILINE)  # "1. "
-_CODE_SPLIT = re.compile(r"(```.*?```|`[^`]*`)", re.S)  # тройной/инлайн код
-_HEADING_LINE = re.compile(r"^(?:\s*#+\s*)+(?P<txt>\S[^\n]*)\s*$", re.MULTILINE)
-_URL_IN_PARENS = re.compile(r"\((https?://[^)\s]+)\)")
-_UNINDENT = re.compile(r"(?m)^(?![ \t]*(?:[-+*]|\d+\.|>))\s{2,}(?=\S)")
-_UNINDENT_MARKERS = re.compile(r"(?m)^[ \t]+(?=(?:[-+*]\s|\d+\\\.\s|>))")
-
-# жирный: **…** и *…* (не захватываем "* " маркер списка)
-_DBL_BOLD = re.compile(r"(?<!\\)\*\*([^*\n]+?)\*\*")
-_BOLD_PAIR = re.compile(r"(?<!\\)\*(?!\s)([^*\n]+?)\*")
-
-# строки "1. https://..." (источники)
-_SOURCES_LINE = re.compile(r"^\s*(\d+)\.\s+(https?://\S+)\s*$", re.M)
-
-# markdown-ссылки модели [текст](http…): сохраняем как кликабельные
 _MD_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _HTTP_URL = re.compile(r"https?://[^\s<>\]\)]+")
-PH_LINK = "￰"  # сентинел вокруг индекса защищённой ссылки
-
-# плейсхолдеры
-PH_MINUS = "\ufff1"
-PH_PLUS = "\ufff2"
-PH_STAR = "\ufff3"
-PH_QUOTE = "\ufff4"
-PH_DOT = "\ufff5"
-PH_BOPEN = "\ufff6"
-PH_BCLOSE = "\ufff7"
-PH_LB = "\uffca"
-PH_RB = "\uffcb"
-PH_LP = "\uffcc"
-PH_RP = "\uffcd"  # [ ] ( ) в ссылках
-
-
-def normalize(text: str) -> str:
-    if not text:
-        return text
-    return (
-        text.replace("\u00a0", " ")
-        .replace("\u202f", " ")
-        .replace("\u2009", " ")
-        .replace("\u2011", "-")
-    )
-
-
-def _headings_to_bold(seg: str) -> str:
-    seg = _HEADING_LINE.sub(lambda m: f"*{m.group('txt')}*\n\n", seg)
-    # не даём накапливаться лишним переносам
-    return re.sub(r"\n{3,}", "\n\n", seg)
-
-
-_BULLET_PH = {"-": PH_MINUS, "+": PH_PLUS, "*": PH_STAR}
-
-
-def _hide_markers(seg: str) -> str:
-    def repl_list(m):
-        return f"{m.group(1)}{_BULLET_PH[m.group(2)]}{m.group(3)}"
-
-    seg = _LIST_MARKER.sub(repl_list, seg)
-    seg = _QUOTE_MARKER.sub(lambda m: f"{m.group(1)}{PH_QUOTE * len(m.group(2))}{m.group(3)}", seg)
-    seg = _NUMERIC_MARK.sub(lambda m: f"{m.group(1)}{PH_DOT}{m.group(3)}", seg)
-    return seg
-
-
-def _restore_markers(seg: str) -> str:
-    # точку в нумсписке возвращаем экранированной (1\. )
-    return (
-        seg.replace(PH_MINUS, "-")
-        .replace(PH_PLUS, "+")
-        .replace(PH_STAR, "*")
-        .replace(PH_QUOTE, ">")
-        .replace(PH_DOT, "\\.")
-    )
-
-
-def escape_markdown_v2(text: str) -> str:
-    if not text:
-        return text
-    text = strip_think(normalize(text))
-
-    # Сохраняем markdown-ссылки модели [текст](http…) как кликабельные: прячем
-    # готовую MarkdownV2-ссылку за сентинел, чтобы её не тронуло экранирование,
-    # и восстанавливаем в самом конце.
-    link_store: list[str] = []
-
-    def _protect_link(m: "re.Match[str]") -> str:
-        label = escape_markdown(m.group(1), version=2)
-        url = escape_markdown(m.group(2), version=2, entity_type="text_link")
-        link_store.append(f"[{label}]({url})")
-        return f"{PH_LINK}{len(link_store) - 1}{PH_LINK}"
-
-    parts = _CODE_SPLIT.split(text)  # [non-code, code, non-code, ...]
-    for i in range(0, len(parts), 2):
-        seg = parts[i]
-
-        seg = _MD_LINK.sub(_protect_link, seg)
-
-        # источники "1. https://..." -> читаемая ссылка
-        def _src_repl(m):
-            url = m.group(2)
-            link_target = url.replace(")", r"\)").replace("(", r"\(")
-            link_text = unquote(url)
-            return f"{PH_LB}{link_text}{PH_RB}{PH_LP}{link_target}{PH_RP}"
-
-        seg = _SOURCES_LINE.sub(_src_repl, seg)
-
-        seg = _headings_to_bold(seg)  # # Заголовки -> *жирный*
-
-        # прячем жирный
-        seg = _DBL_BOLD.sub(lambda m: f"{PH_BOPEN}{m.group(1)}{PH_BCLOSE}", seg)
-        seg = _BOLD_PAIR.sub(lambda m: f"{PH_BOPEN}{m.group(1)}{PH_BCLOSE}", seg)
-
-        # прячем маркеры, экранируем спецсимволы, возвращаем маркеры
-        seg = _hide_markers(seg)
-        seg = _SPECIAL.sub(r"\\\1", seg)
-        seg = _SINGLE_STAR.sub(r"\\*", seg)
-        seg = _restore_markers(seg)
-
-        # убрать ведущие пробелы перед маркерами списков/нумерации/цитат
-        seg = _UNINDENT_MARKERS.sub("", seg)
-
-        # ← вот это новенькое: убираем лишние отступы в начале строк, кроме настоящих маркеров
-        seg = _UNINDENT.sub("", seg)
-
-        # возвращаем жирный и синтаксис ссылок
-        seg = seg.replace(PH_BOPEN, "*").replace(PH_BCLOSE, "*")
-        seg = seg.replace(PH_LB, "[").replace(PH_RB, "]").replace(PH_LP, "(").replace(PH_RP, ")")
-
-        # гарантируем пустую строку ПЕРЕД строками-заголовками вида *...*\n\n
-        # (если 0 или 1 перенос — делаем два; если уже два, не трогаем)
-        seg = re.sub(r"(?<!\n)\n?(\*[^*\n]+\*\n\n)", r"\n\n\1", seg)
-        # не даём накапливаться лишним переносам
-        seg = re.sub(r"\n{3,}", "\n\n", seg)
-
-        # снять экранирование внутри URL
-        seg = _URL_IN_PARENS.sub(lambda m: f"({m.group(1).replace(r'', '')})", seg)
-
-        # если маркеры цитаты/нумерации встретились не в начале строки — перенос
-        seg = re.sub(r"(?<!^)(?<![\n\r])((?:\d+\\\.|>))(?=\s)", r"\n\1", seg)
-
-        parts[i] = seg
-
-    result = "".join(parts)
-    for idx, link in enumerate(link_store):
-        result = result.replace(f"{PH_LINK}{idx}{PH_LINK}", link)
-    return result
 
 
 def _first_http_url(text: str) -> str | None:
@@ -862,25 +715,6 @@ async def _publish_draft_updates(
         next_update_at = loop.time() + _DRAFT_UPDATE_INTERVAL_SECONDS
 
 
-def _clean_text_for_plain_send(text: str) -> str:
-    # Rule 1: Remove all backslashes and all asterisks, except for newlines.
-    cleaned_text = text.replace("\\", "").replace("*", "")
-
-    # Rule 2: Detect and remove ONLY URLs in (...) including "(",")" themselves.
-    # Use the existing _URL_IN_PARENS regex.
-    cleaned_text = _URL_IN_PARENS.sub("", cleaned_text)
-
-    # Rule 3: If there is a line that equals "---" (ignoring whitespace) remove this line
-    lines = cleaned_text.split("\n")
-    filtered_lines = [line for line in lines if line.strip() != "---"]
-    cleaned_text = "\n".join(filtered_lines)
-
-    # Rule 4: Check for empty lines, no more than 2 empty lines (\n\n)
-    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
-
-    return cleaned_text
-
-
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     await _ensure_settings_loaded(context, chat_id)
@@ -1033,14 +867,11 @@ async def fast_reply_handler(
             feedback_keyboard = get_feedback_keyboard(context, lang, request_id)
 
         # Fast Reply is the local route: no external injection vector, so render
-        # the model's markdown faithfully (bold, headings, lists, and clickable
-        # links) instead of stripping links via the rich renderer. escape_markdown_v2
-        # converts formatting and preserves [text](url) links as MarkdownV2.
-        telegram_text = escape_markdown_v2(f"{final_answer}\n\n{latency_badge}")
-        await send_long_message(
+        # the model's markdown faithfully (bold, headings, lists, clickable links
+        # and code blocks). send_rich converts CommonMark to Telegram entities.
+        await send_rich(
             update,
-            telegram_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
+            f"{final_answer}\n\n{latency_badge}",
             reply_markup=feedback_keyboard,
             link_preview_options=_visible_link_preview(_first_http_url(final_answer)),
         )
@@ -1175,17 +1006,17 @@ async def grounded_web_reply_handler(
 
         # The chunk text is still untrusted web content, so sanitize the model
         # output (strip any links it echoed) before attaching the app-trusted
-        # citation URLs as real MarkdownV2 links. Web ON uses the regular send
-        # path so it can show a link preview; Telegram renders at most one per
+        # citation URLs as Markdown links. send_rich escapes them safely into
+        # Telegram entities. Telegram renders at most one link preview per
         # message, so point it at the top source.
         safe_answer = sanitize_untrusted_markdown(answer_text, neutralize_plain_urls=True)
-        body = escape_markdown_v2(f"{safe_answer}\n\n{badge}")
         source_lines = [
-            f"{index}\\. [{escape_markdown(_display_host(item.canonical_url), version=2)}]"
-            f"({escape_markdown(item.canonical_url, version=2, entity_type='text_link')})"
+            f"{index}. [{_display_host(item.canonical_url)}]({item.canonical_url})"
             for index, item in enumerate(top_citations, start=1)
         ]
-        message = f"{body}\n\n{chr(10).join(source_lines)}" if source_lines else body
+        message = f"{safe_answer}\n\n{badge}"
+        if source_lines:
+            message += "\n\n" + "\n".join(source_lines)
         link_preview = (
             _visible_link_preview(top_citations[0].canonical_url)
             if top_citations
@@ -1199,10 +1030,9 @@ async def grounded_web_reply_handler(
                 SourceExploration(chat_id=chat_id, query=query, language=language),
             )
             reply_markup = get_web_answer_keyboard(context, language, exploration_token)
-        await send_long_message(
+        await send_rich(
             update,
             message,
-            parse_mode=ParseMode.MARKDOWN_V2,
             link_preview_options=link_preview,
             reply_markup=reply_markup,
         )
@@ -1338,315 +1168,76 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ---------------------------------------------------------------------------#
-# Safe split & send for MarkdownV2 (final)
+# Rich delivery via telegramify-markdown (entity-based, no MarkdownV2 escaping)
 # ---------------------------------------------------------------------------#
 
-# --- Code-as-file helpers (используются в send_long_message) ---
-_CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+\-]*)\n([\s\S]*?)\n```", re.M)
-_CODE_AS_FILE_THRESHOLD = 2000  # порог, когда код выносить во вложение
+# Code blocks with at least this many lines are delivered as a file attachment
+# instead of an inline ``pre`` block.
+_CODE_TO_FILE_MIN_LINES = 30
 
 
-def _guess_ext(lang: str) -> str:
-    m = {
-        "py": "py",
-        "python": "py",
-        "js": "js",
-        "javascript": "js",
-        "ts": "ts",
-        "typescript": "ts",
-        "json": "json",
-        "bash": "sh",
-        "sh": "sh",
-        "shell": "sh",
-        "html": "html",
-        "css": "css",
-        "java": "java",
-        "c": "c",
-        "cpp": "cpp",
-        "c++": "cpp",
-        "go": "go",
-        "golang": "go",
-        "rs": "rs",
-        "rust": "rs",
-        "rb": "rb",
-        "ruby": "rb",
-        "php": "php",
-        "kt": "kt",
-        "kotlin": "kt",
-        "swift": "swift",
-        "sql": "sql",
-        "yaml": "yml",
-        "yml": "yml",
-        "md": "md",
-        "markdown": "md",
-        "txt": "txt",
-        "text": "txt",
-        "": "txt",
-    }
-    return m.get((lang or "").lower(), "txt")
+def _plain_fallback(text: str) -> str:
+    """Strip Markdown decoration for a last-resort plain-text send."""
+
+    text = re.sub(r"```[A-Za-z0-9_+\-]*\n?", "", text).replace("```", "")
+    text = text.replace("**", "").replace("__", "")
+    text = _MD_LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-async def _extract_code_to_files(update, text: str) -> str:
-    """
-    Находит большие ```lang\n...\n``` блоки, шлёт их как document,
-    а в тексте оставляет плейсхолдер 'Код во вложении'.
-    """
-    out, pos, idx = [], 0, 1
-    for m in _CODE_BLOCK_RE.finditer(text):
-        lang, code = m.group(1), m.group(2)
-        if len(code) < _CODE_AS_FILE_THRESHOLD:
-            continue
-        out.append(text[pos : m.start()])  # кусок до кода
-        ext = _guess_ext(lang)
-        bio = io.BytesIO(code.encode("utf-8"))
-        bio.name = f"snippet_{idx}.{ext}"
-        reply_target = getattr(update, "effective_message", None) or update.message
-        await reply_target.reply_document(InputFile(bio))
-        out.append("👆📄📎\n")  # безопасный плейсхолдер
-        pos = m.end()
-        idx += 1
-    out.append(text[pos:])
-    return "".join(out)
+async def send_rich(update, text: str, **kwargs):
+    """Deliver a model answer to Telegram using entity-based formatting.
 
-
-async def send_long_message(update, text: str, **kwargs):
-    """
-    Безопасная отправка длинных сообщений для Telegram MarkdownV2:
-    • не режет между '\' и следующим символом, внутри **…**, `…` и ```…```;
-    • закрывает незакрытые сущности в чанке;
-    • при BadRequest на '#'/'.' экранирует их вне кода и повторяет отправку;
-    • если всё ещё падает на '-', экранирует дефисы вне кода, сохраняя маркеры '- '.
+    ``telegramify`` converts CommonMark to Telegram ``MessageEntity`` objects
+    (bold, inline code, links, ...), so messages go out without ``parse_mode``
+    and need no manual MarkdownV2 escaping - which removes the whole class of
+    ``BadRequest`` failures on reserved characters. Long code blocks become file
+    attachments. ``reply_markup`` / ``link_preview_options`` ride on the final
+    message only. On any failure we fall back to a plain-text send so a reply is
+    never dropped.
     """
 
     reply_target = getattr(update, "effective_message", None) or update.message
-    MAX = 4096
-    if text is None:
-        text = ""
-
-    text = await _extract_code_to_files(update, text)
-
-    # ---------- helpers: safe split ----------
-    _DBL_STAR_RE = re.compile(r"(?<!\\)\*\*")  # неэкранированные **
-    _TRIPLE_RE = re.compile(r"(?<!\\)```")  # неэкранированные ```
-    _BACKTICK_RE = re.compile(r"(?<!\\)`")  # неэкранированные `
-    _CODE_SPLIT = re.compile(r"(```.*?```|`[^`]*`)", re.S)
-    _LINK_RE = re.compile(r"(\[[^\]]+\])\((https?://[^)\s]+)\)")  # [text](url)
-
-    def _is_safe_cut(s: str, idx: int) -> bool:
-        if idx <= 0 or idx >= len(s):
-            return True
-        if s[idx - 1] == "\\":  # не после обратного слэша
-            return False
-        if s[idx - 1] == "*" and s[idx] == "*":  # не между '**'
-            return False
-        if s[idx - 1] == "`" and s[idx] == "`":  # не между '``'
-            return False
-        if len(_TRIPLE_RE.findall(s[:idx])) % 2 == 1:  # не внутри ``` … ```
-            return False
-        if len(_BACKTICK_RE.findall(s[:idx])) % 2 == 1:  # не внутри ` … `
-            return False
-        if len(_DBL_STAR_RE.findall(s[:idx])) % 2 == 1:  # не при незакрытом **
-            return False
-        return True
-
-    def _find_safe_cut(s: str, limit: int) -> int:
-        end = min(limit, len(s))
-        # сначала ищем перевод строки или пробел
-        candidates = [s.rfind("\n", 0, end), s.rfind(" ", 0, end)]
-        cut = max([c for c in candidates if c != -1], default=end)
-        probe = cut
-        while probe > 0 and not _is_safe_cut(s, probe):
-            probe -= 1
-        return probe if probe > 0 and _is_safe_cut(s, probe) else end
-
-    def _neutralize_unbalanced(chunk: str) -> str:
-        # закрыть незакрытый ```/`
-        if len(_TRIPLE_RE.findall(chunk)) % 2 == 1:
-            chunk += "\n```"
-        if len(_BACKTICK_RE.findall(chunk)) % 2 == 1:
-            chunk += "`"
-        # экранировать последнюю не закрытую '**'
-        if len(_DBL_STAR_RE.findall(chunk)) % 2 == 1:
-            last = chunk.rfind("**")
-            if last != -1 and (last == 0 or chunk[last - 1] != "\\"):
-                chunk = chunk[:last] + r"\**" + chunk[last + 2 :]
-        # если заканчивается одиночным '\', удваиваем
-        if chunk.endswith("\\") and not chunk.endswith("\\\\"):
-            chunk += "\\"
-        return chunk
-
-    # --- NEW: маленькие помощники для границы чанка ---
-    def _avoid_digit_split(left: str, right: str) -> tuple[str, str]:
-        """Если слева оканчивается цифрами, а справа начинается цифрой — не резать '10'."""
-        if left and right and left[-1].isdigit() and right[0].isdigit():
-            j = len(left) - 1
-            while j >= 0 and left[j].isdigit():
-                j -= 1
-            moved = left[j + 1 :]  # хвост цифр, например '10'
-            return left[: j + 1], moved + right
-        return left, right
-
-    def _fix_boundary_inside_link(left: str, right: str) -> tuple[str, str]:
-        """
-        Не резать внутри [текст](url).
-        Если слева есть '[' без соответствующего ']' — переносим границу к этому '['.
-        Если слева есть ']' и затем незакрытая '(' — переносим границу к ']'.
-        """
-        lb = left.rfind("[")
-        rb = left.rfind("]")
-        if lb > rb:  # внутри текста ссылки
-            cut = lb
-            return left[:cut], left[cut:] + right
-        lp = left.rfind("(")
-        rp = left.rfind(")")
-        if rb != -1 and rb < lp > rp:  # внутри (url)
-            cut = rb  # порежем перед '('
-            return left[:cut], left[cut:] + right
-        return left, right
-
-    # ---------- helpers: fallbacks ----------
-    def _escape_hash_and_dot_outside_code(s: str) -> str:
-        """Экранируем # и . вне кода и ВНЕ URL."""
-        PH_L = "\uf101"
-        PH_R = "\uf102"  # плейсхолдеры для ( )
-        parts = _CODE_SPLIT.split(s)
-        for i in range(0, len(parts), 2):
-            seg = parts[i]
-            # прячем ссылки: (url) -> PH_L url PH_R
-            seg = _LINK_RE.sub(lambda m: f"{m.group(1)}{PH_L}{m.group(2)}{PH_R}", seg)
-            # экранируем
-            seg = re.sub(r"(?<!\\)#", r"\#", seg)
-            seg = re.sub(r"(?<!\\)\.", r"\.", seg)
-            # возвращаем ссылки
-            seg = seg.replace(PH_L, "(").replace(PH_R, ")")
-            parts[i] = seg
-        return "".join(parts)
-
-    def _escape_parens_outside_code(s: str) -> str:
-        """Экранируем круглые скобки вне кода и ВНЕ [текст](url)."""
-        PH_L = "\uf121"
-        PH_R = "\uf122"  # плейсхолдеры для ( )
-        parts = _CODE_SPLIT.split(s)
-        for i in range(0, len(parts), 2):
-            seg = parts[i]
-            # прячем ссылки: (url) -> PH_L url PH_R
-            seg = _LINK_RE.sub(lambda m: f"{m.group(1)}{PH_L}{m.group(2)}{PH_R}", seg)
-            # экранируем обычные скобки
-            seg = re.sub(r"(?<!\\)\(", r"\(", seg)
-            seg = re.sub(r"(?<!\\)\)", r"\)", seg)
-            # возвращаем ссылки
-            seg = seg.replace(PH_L, "(").replace(PH_R, ")")
-            parts[i] = seg
-        return "".join(parts)
-
-    def _escape_hyphens_outside_code(s: str) -> str:
-        """Экранируем '-' вне кода и ВНЕ URL. Маркеры списков '- ' тоже экранируем."""
-        PH_L = "\uf111"
-        PH_R = "\uf112"
-        parts = _CODE_SPLIT.split(s)
-        for i in range(0, len(parts), 2):
-            seg = parts[i]
-            # прячем ссылки
-            seg = _LINK_RE.sub(lambda m: f"{m.group(1)}{PH_L}{m.group(2)}{PH_R}", seg)
-            # списочные маркеры "- " -> "\- "
-            seg = re.sub(
-                r"^( *)(-)(\s+)", lambda m: f"{m.group(1)}\\-{m.group(3)}", seg, flags=re.M
-            )
-            # остальные дефисы
-            seg = re.sub(r"(?<!\\)-", r"\-", seg)
-            # возвращаем ссылки
-            seg = seg.replace(PH_L, "(").replace(PH_R, ")")
-            parts[i] = seg
-        return "".join(parts)
-
-    # ---------- sending ----------
-    if len(text) <= MAX:
-        try:
-            await reply_target.reply_text(text, **kwargs)
-        except BadRequest:
-            safe = _escape_hash_and_dot_outside_code(text)
-            try:
-                await reply_target.reply_text(safe, **kwargs)
-            except BadRequest:
-                safer = _escape_hyphens_outside_code(safe)
-                try:
-                    await reply_target.reply_text(safer, **kwargs)
-                except BadRequest as e:  # This is the innermost BadRequest
-                    logger.warning(
-                        f"Failed to send message with MarkdownV2 after all escapes. Sending as plain text. Error: {e}",
-                        exc_info=True,
-                    )
-                    cleaned_final_text = _clean_text_for_plain_send(text)
-                    # Send original text, remove parse_mode from kwargs
-                    plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
-                    await reply_target.reply_text(
-                        cleaned_final_text, parse_mode=None, **plain_kwargs
-                    )
+    if not text:
         return
 
-    rest = text
-    # клавиатуру/inline-кнопки показываем только в последнем сообщении
-    # A selected preview URL has to be present in the message being sent.  Do
-    # not pass it to earlier chunks: Telegram rejects that combination, and it
-    # used to make long Web ON answers lose their final delivery/preview.
-    common_kwargs = {
-        k: v for k, v in kwargs.items() if k not in {"reply_markup", "link_preview_options"}
-    }
-    last_kwargs = kwargs
+    tail_keys = ("reply_markup", "link_preview_options")
+    tail_kwargs = {k: kwargs[k] for k in tail_keys if k in kwargs}
+    base_kwargs = {k: v for k, v in kwargs.items() if k not in tail_keys and k != "parse_mode"}
 
-    while rest:
-        if len(rest) <= MAX:
-            chunk, rest = rest, ""
-        else:
-            cut = _find_safe_cut(rest, MAX)
-            if cut <= 0:
-                cut = MAX  # страховка
-            chunk, rest = rest[:cut], rest[cut:]
+    try:
+        boxes = await telegramify(
+            content=text,
+            max_message_length=_DRAFT_TEXT_LIMIT,
+            min_file_lines=_CODE_TO_FILE_MIN_LINES,
+            render_mermaid=False,
+        )
+    except Exception as exc:
+        logger.warning("telegramify failed type=%s; sending plain text", type(exc).__name__)
+        await reply_target.reply_text(_plain_fallback(text), **base_kwargs, **tail_kwargs)
+        return
 
-            # --- NEW: не резать между цифрами (например, '10\. ')
-            chunk, rest = _avoid_digit_split(chunk, rest)
-            # --- NEW: не резать внутри [текст](url)
-            chunk, rest = _fix_boundary_inside_link(chunk, rest)
-
-        chunk = _neutralize_unbalanced(chunk)
-
+    for index, box in enumerate(boxes):
+        is_last = index == len(boxes) - 1
+        send_kwargs = {**base_kwargs, **(tail_kwargs if is_last else {})}
+        doc_kwargs = {k: v for k, v in send_kwargs.items() if k != "link_preview_options"}
         try:
-            if rest:
-                await reply_target.reply_text(chunk, **common_kwargs)
+            if box.content_type == ContentType.FILE:
+                document = InputFile(io.BytesIO(box.file_data), filename=box.file_name)
+                await reply_target.reply_document(
+                    document,
+                    caption=box.caption_text or None,
+                    caption_entities=box.caption_entities or None,
+                    **doc_kwargs,
+                )
             else:
-                await reply_target.reply_text(chunk, **last_kwargs)
-        except BadRequest:
-            # 1-й повтор: экранируем # и . вне кода
-            safe_chunk = _escape_hash_and_dot_outside_code(chunk)
-            try:
-                if rest:
-                    await reply_target.reply_text(safe_chunk, **common_kwargs)
-                else:
-                    await reply_target.reply_text(safe_chunk, **last_kwargs)
-            except BadRequest:
-                # 2-й повтор: экранируем '-' вне кода, сохраняя '- ' маркеры
-                safer_chunk = _escape_hyphens_outside_code(safe_chunk)
-                try:
-                    if rest:
-                        await reply_target.reply_text(safer_chunk, **common_kwargs)
-                    else:
-                        await reply_target.reply_text(safer_chunk, **last_kwargs)
-                except BadRequest as e:  # This is the innermost BadRequest
-                    logger.warning(
-                        f"Failed to send chunk with MarkdownV2 after all escapes. Sending as plain text. Error: {e}",
-                        exc_info=True,
-                    )
-                    cleaned_final_chunk = _clean_text_for_plain_send(chunk)
-                    if rest:
-                        plain_kwargs = {k: v for k, v in common_kwargs.items() if k != "parse_mode"}
-                        await reply_target.reply_text(
-                            cleaned_final_chunk, parse_mode=None, **plain_kwargs
-                        )
-                    else:
-                        plain_kwargs = {k: v for k, v in last_kwargs.items() if k != "parse_mode"}
-                        await reply_target.reply_text(
-                            cleaned_final_chunk, parse_mode=None, **plain_kwargs
-                        )
+                await reply_target.reply_text(
+                    box.text, entities=box.entities or None, **send_kwargs
+                )
+        except BadRequest as exc:
+            logger.warning("Rich send failed type=%s; plain-text fallback", type(exc).__name__)
+            source = text if box.content_type == ContentType.FILE else box.text
+            await reply_target.reply_text(_plain_fallback(source), **doc_kwargs)
 
 
 async def process_buffered_messages(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1798,9 +1389,6 @@ async def main_async() -> None:
     )
     application.bot_data["grounded_synthesizer"] = (
         GroundedSynthesizer(inference_provider) if search_provider is not None else None
-    )
-    application.bot_data["rich_message_renderer"] = RichMessageRenderer(
-        enabled=config.TELEGRAM_RICH_MESSAGES
     )
 
     application.add_handler(CommandHandler("start", start))

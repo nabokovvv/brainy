@@ -23,7 +23,7 @@ scope → acceptance criteria → test → implementation → review → commit.
 
 `handle_fast_chat` в `bot.py:520-583` уже вычисляет `result.model.provider`,
 `result.model.name`, `result.latency_ms` и логирует их одной строкой
-(`bot.py:559-563`). Ответ отправляется через `send_long_message` без
+(`bot.py:559-563`). Ответ отправляется через `send_rich` без
 клавиатуры. Кнопки инлайн-клавиатуры уже есть паттерном в `get_route_keyboard`
 и обрабатываются в `button()` (`bot.py:296-341`) через `callback_data` с
 префиксом действия (`ACTION_TOGGLE_WEB` и т.п.) — feedback follows тот же

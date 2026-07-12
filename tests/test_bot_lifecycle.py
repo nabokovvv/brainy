@@ -177,15 +177,6 @@ class _NonStreamingProvider:
         )
 
 
-class _SuccessfulRichRenderer:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    async def send_final(self, bot_instance: object, **kwargs: object) -> bool:
-        self.calls.append(kwargs)
-        return True
-
-
 class _FailingTranscriber:
     async def transcribe(self, path: str, *, language: str) -> str:
         raise RuntimeError("transcription failed")
@@ -333,13 +324,13 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async def capture_final(update_arg, text: str, **kwargs: object) -> None:
             final_messages.append((text, kwargs.get("parse_mode")))
 
-        with patch.object(bot, "send_long_message", capture_final):
+        with patch.object(bot, "send_rich", capture_final):
             await bot.fast_reply_handler(update, context, "question")
 
         self.assertFalse(provider.chat_called)
         self.assertEqual(len(final_messages), 1)
         self.assertIn("Fast answer", final_messages[0][0])
-        self.assertIn("⚡ 0\\.4s", final_messages[0][0])
+        self.assertIn("⚡ 0.4s", final_messages[0][0])
 
     async def test_fast_reply_falls_back_for_non_streaming_provider(self) -> None:
         telegram_bot = _Bot()
@@ -361,18 +352,16 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async def capture_final(update_arg, text: str, **kwargs: object) -> None:
             final_messages.append(text)
 
-        with patch.object(bot, "send_long_message", capture_final):
+        with patch.object(bot, "send_rich", capture_final):
             await bot.fast_reply_handler(update, context, "question")
 
         self.assertEqual(len(final_messages), 1)
         self.assertIn("Fallback answer", final_messages[0])
 
-    async def test_fast_reply_uses_regular_send_to_keep_model_links(self) -> None:
-        # Fast Reply renders the model's markdown (including clickable links) via
-        # the regular send path; it must not route through the rich renderer,
-        # which strips links and cannot show a link preview.
+    async def test_fast_reply_requests_visible_link_preview(self) -> None:
+        # Fast Reply renders the model's markdown (including clickable links) and
+        # asks Telegram for a visible link preview of the first URL.
         telegram_bot = _Bot()
-        rich_renderer = _SuccessfulRichRenderer()
         message = _Message()
         update = SimpleNamespace(effective_chat=SimpleNamespace(id=42), message=message)
         context = SimpleNamespace(
@@ -383,7 +372,6 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     "translator": _Translator(),
                     "llm_semaphore": asyncio.Semaphore(1),
                     "inference_provider": _NonStreamingProvider(),
-                    "rich_message_renderer": rich_renderer,
                 }
             ),
         )
@@ -392,10 +380,9 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async def capture_final(update_arg, text: str, **kwargs: object) -> None:
             final_messages.append((text, kwargs.get("link_preview_options")))
 
-        with patch.object(bot, "send_long_message", capture_final):
+        with patch.object(bot, "send_rich", capture_final):
             await bot.fast_reply_handler(update, context, "question")
 
-        self.assertEqual(len(rich_renderer.calls), 0)
         self.assertEqual(len(final_messages), 1)
         self.assertIn("Fallback answer", final_messages[0][0])
         self.assertIsNotNone(final_messages[0][1])

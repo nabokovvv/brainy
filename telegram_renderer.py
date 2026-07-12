@@ -1,26 +1,12 @@
-"""Fail-soft Telegram Bot API 10.1 rich final-message adapter."""
+"""Sanitization of untrusted (web) model output before Telegram delivery."""
 
 from __future__ import annotations
 
-import asyncio
-import logging
 import re
-from typing import Any
 
-from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError, TimedOut
-
-logger = logging.getLogger(__name__)
-
-_RICH_MESSAGE_LIMIT = 32_768
 _CODE_SEGMENTS = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
 _REFERENCE_DEFINITION = re.compile(r"(?mi)^\s*\[[^\]\n]+\]:\s*https?://\S+\s*$")
 _PLAIN_URL = re.compile(r"(?i)https?://[^\s<>()]+")
-
-
-def _escape_rich_html(text: str) -> str:
-    """Neutralize raw HTML without breaking Markdown blockquote markers."""
-
-    return text.replace("&", "&amp;").replace("<", "&lt;")
 
 
 def _delimiter_pairs(text: str, opening: str, closing: str) -> dict[int, int]:
@@ -76,89 +62,3 @@ def sanitize_untrusted_markdown(answer: str, *, neutralize_plain_urls: bool = Fa
             part = _PLAIN_URL.sub(lambda match: f"`{match.group(0)}`", part)
         parts[index] = part
     return "".join(parts).strip()
-
-
-def build_safe_rich_markdown(answer: str, badge: str) -> str:
-    """Keep useful Markdown while blocking model-authored links, HTML, and remote media."""
-
-    parts = _CODE_SEGMENTS.split(sanitize_untrusted_markdown(answer))
-    for index, part in enumerate(parts):
-        if not part:
-            continue
-        parts[index] = _escape_rich_html(part)
-    safe_answer = "".join(parts).strip()
-    safe_badge = _escape_rich_html(badge.strip())
-    return f"{safe_answer}\n\n<footer>{safe_badge}</footer>"
-
-
-class RichMessageRenderer:
-    """Try Bot API 10.1 once, then let the caller use its stable fallback.
-
-    Transport failures are ambiguous because Bot API sends have no idempotency key.
-    Brainy is delivery-first: the regular fallback may rarely duplicate a rich message
-    that Telegram accepted immediately before the connection failed.
-    """
-
-    def __init__(self, *, enabled: bool, max_chars: int = _RICH_MESSAGE_LIMIT) -> None:
-        if not isinstance(enabled, bool):
-            raise TypeError("enabled must be boolean")
-        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
-            raise ValueError("max_chars must be positive")
-        self._enabled = enabled
-        self._max_chars = min(max_chars, _RICH_MESSAGE_LIMIT)
-        self._supported = True
-
-    async def send_final(
-        self,
-        bot: Any,
-        *,
-        chat_id: int,
-        answer: str,
-        badge: str,
-        reply_markup: Any = None,
-    ) -> bool:
-        """Return False when the regular persistent-message fallback should run."""
-
-        if not self._enabled or not self._supported:
-            return False
-        rich_markdown = build_safe_rich_markdown(answer, badge)
-        if len(rich_markdown) > self._max_chars:
-            return False
-        do_api_request = getattr(bot, "do_api_request", None)
-        if not callable(do_api_request):
-            self._supported = False
-            return False
-
-        payload: dict[str, object] = {
-            "chat_id": chat_id,
-            "rich_message": {
-                "markdown": rich_markdown,
-                "skip_entity_detection": True,
-            },
-        }
-        if reply_markup is not None:
-            payload["reply_markup"] = reply_markup
-        try:
-            await asyncio.wait_for(
-                do_api_request("sendRichMessage", api_kwargs=payload),
-                timeout=5,
-            )
-            return True
-        except BadRequest:
-            self._supported = False
-            logger.info("Telegram rich message unsupported; circuit opened for this process")
-            return False
-        except (TimeoutError, NetworkError, RetryAfter, TimedOut):
-            logger.info("Telegram rich message transiently unavailable; using regular fallback")
-            return False
-        except TelegramError:
-            self._supported = False
-            logger.info("Telegram rich message unsupported; circuit opened for this process")
-            return False
-        except Exception as exc:
-            self._supported = False
-            logger.warning(
-                "Telegram rich renderer failed type=%s; using regular fallback",
-                type(exc).__name__,
-            )
-            return False

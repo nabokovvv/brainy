@@ -59,62 +59,26 @@
 
 ---
 
-## Existing Implementation in Repo: `telegram_renderer.py`
+## Current Implementation (2026-07-12 update)
 
-A `RichMessageRenderer` class that:
-- Calls raw `sendRichMessage` via `bot.do_api_request()`
-- Sanitizes markdown: strips tracking pixels, invented URLs, escapes HTML in code blocks
-- Circuit-breaker: permanent `BadRequest` → disables rich for process lifetime
-- Transient errors (network) → fallback without disabling
-- Falls back to regular `sendMessage` on any failure
-- **No paid features**: omits `allow_paid_broadcast`, `message_effect_id`
-
-### Test Coverage (5 tests)
-- ✅ Sanitization preserves structure, blocks untrusted media/links
-- ✅ Successful rich send uses `sendRichMessage` with correct payload
-- ✅ Unsupported API → circuit opens, no retry
-- ✅ Transient network error → fallback, circuit stays closed
-- ✅ Disabled / oversized → immediate fallback, no API call
-
----
-
-## Compatibility / Fallback Checklist
-
-### For Each Message Sent
-- [ ] **Try rich path first** (if enabled and size < limit)
-- [ ] **On success**: done
-- [ ] **On `BadRequest` / method not found**: disable rich for process, fallback
-- [ ] **On transient error** (NetworkError, Timeout, RetryAfter): fallback, keep rich enabled
-- [ ] **Fallback**: `sendMessage` with MarkdownV2, same sanitized content
-- [ ] **Never include**: `allow_paid_broadcast`, `message_effect_id`, `star_count`
-
-### Sanitization Rules (Applied to Both Paths)
-- [ ] Strip `<img>` / `![...](tracking-url)` → tracking pixels
-- [ ] Strip invented markdown links `[text](https://invented.invalid)` 
-- [ ] Keep plain HTTPS URLs (auto-link)
-- [ ] Escape HTML inside code blocks (`<` → `<`)
-- [ ] Preserve: headings, code blocks, math (`$$...$$`), blockquotes
-- [ ] Add footer badge: `<footer>⚡ X.Xs</footer>`
-
-### Configuration
-| Setting | Default | Notes |
-|---------|---------|-------|
-| `RICH_MESSAGES_ENABLED` | `true` | Can be disabled via env |
-| `RICH_MAX_CHARS` | `4096` | Telegram message limit |
-| `RICH_CIRCUIT_BREAKER_TTL` | `infinite` | Process lifetime once opened |
-
----
-
-## Recommendation for Stage 1
-
-**Current approach is correct**: Use `telegram_renderer.RichMessageRenderer` with raw API calls + circuit breaker + MarkdownV2 fallback.
+The raw `sendRichMessage` path described above was scaffolded (`telegram_renderer.RichMessageRenderer`,
+registered in `bot_data`) but never actually called by a real handler, and was
+removed. Brainy instead delivers formatting through `bot.send_rich()`, which
+converts the model's markdown into `MessageEntity` lists via
+`telegramify-markdown` and sends them with `entities=...` — no `parse_mode`,
+no manual escaping. See `docs/RICH_MESSAGES_AUDIT.md` for the current design
+and rationale; this file is kept for its Bot API 10.1 / PTB 22.8 compatibility
+matrix above, which is still accurate.
 
 **Do NOT**:
-- Wait for PTB to add wrappers (could be months)
-- Use paid features (Stars, paid broadcast, effects) — budget = $0
-- Assume rich messages work on all clients (older Telegram apps may not render)
+- Reintroduce hand-written MarkdownV2 escaping regexes — that's exactly what
+  this migration removed after it caused hard-to-debug `BadRequest` fallbacks.
+- Wait for PTB to add Rich Message wrappers before revisiting raw `sendRichMessage`
+  (could be months) unless a concrete feature need (tables, math, collapsible
+  sections) can't be expressed with entities.
+- Use paid features (Stars, paid broadcast, effects) — budget = $0.
 
 **DO**:
-- Keep fallback path tested and fast
-- Monitor `BadRequest` rate in logs (circuit open = expected on older API servers)
-- Add telemetry: rich_sent / rich_failed / fallback_used counters
+- Keep `send_rich()`'s plain-text fallback tested and fast.
+- If `telegramify-markdown` mis-renders some model output, fix/report it
+  upstream or adjust the call site — not by re-adding manual escaping.

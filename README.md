@@ -80,7 +80,6 @@ LLM_CLIENT=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
 WEB_ENABLED_DEFAULT=false
 SEARCH_BACKEND=rotation
-TELEGRAM_RICH_MESSAGES=true
 ```
 
 `OLLAMA_MODEL=gemma4:e2b` is confirmed on the target Mac mini. Its first 8K/32K/64K

@@ -1,95 +1,80 @@
-# Telegram Bot API / PTB Rich Messages Audit
+# Telegram Rich Formatting — Current Approach
 
-**Date**: 2026-07-11  
-**PTB Version**: 22.8  
-**Bot API Version**: 10.1 (Rich Messages released 2026-06-11)
+**Updated**: 2026-07-12
+**PTB Version**: 22.8
+**Delivery**: entity-based, via `telegramify-markdown`
 
 ---
 
 ## Executive Summary
 
-PTB 22.8 has no typed wrappers for Bot API 10.1 Rich Messages, but its public
-`Bot.do_api_request()` escape hatch supports new raw endpoints. Brainy uses that path
-for `sendRichMessage` and retains the wrapped MarkdownV2/plain sender as a mandatory
-persistent fallback.
+Brainy no longer hand-escapes MarkdownV2 or calls the raw `sendRichMessage`
+Bot API 10.1 endpoint. Both were replaced by `bot.send_rich()`, which converts
+the model's CommonMark output into Telegram `MessageEntity` lists via the
+`telegramify-markdown` library and sends them with `entities=...` and no
+`parse_mode` at all. Because entities are passed as structured data instead of
+a delimited string, there is nothing for Telegram to reject as "can't parse
+entities" — the whole class of `BadRequest` failures that motivated the old
+three-step MarkdownV2 escaping fallback is gone by construction.
 
 ---
 
-## Feature Compatibility Matrix
+## What `send_rich()` Does (`bot.py`)
 
-| Feature | Bot API 10.1 | PTB 22.8 | Fallback in Brainy |
-|---------|-------------|----------|-------------------|
-| `sendRichMessage` | ✅ | Raw only | `do_api_request` -> MarkdownV2/plain |
-| `sendRichMessageDraft` (streaming) | ✅ | Raw only | wrapped `sendMessageDraft` |
-| `RichTextBold` / `Italic` / `Code` / `Url` | ✅ | ❌ | MarkdownV2 + `MessageEntity` |
-| `RichTextMathematicalExpression` | ✅ | ❌ | `$...$` / `$$...$$` (client-side) |
-| `RichTextReference` / `RichTextReferenceLink` (citations) | ✅ | ❌ | Manual `[n]` + ref list |
-| `RichBlockCode` / `RichBlockPreformatted` | ✅ | ❌ | `\`\`\`lang` fenced blocks |
-| `RichBlockBlockQuotation` / `PullQuotation` | ✅ | ❌ | `>` or `BLOCKQUOTE` entity |
-| `RichBlockTable` | ✅ | ❌ | Markdown pipe tables |
-| `RichBlockDetails` (collapsible) | ✅ | ❌ | No fallback |
-| `RichBlockThinking` | ✅ | ❌ | N/A (local model doesn't emit) |
-| `message_effect_id` param | ✅ | Param exists | No constants/IDs known |
+1. `telegramify(content, max_message_length=4096, min_file_lines=30, render_mermaid=False)`
+   splits the model's raw markdown into an ordered list of `Text` / `File`
+   boxes.
+2. `Text` boxes carry `.text` (plain string, no markdown syntax) plus
+   `.entities` (bold, italic, `pre` code blocks, `text_link`, etc.) — sent via
+   `reply_text(box.text, entities=box.entities)`.
+3. `File` boxes (code fences with 30+ lines) are sent via `reply_document`,
+   same threshold decision the old `_extract_code_to_files` made, just
+   delegated to the library.
+4. `reply_markup` / `link_preview_options` are attached only to the last box
+   in the sequence.
+5. Any unexpected failure (library exception or `BadRequest` from Telegram)
+   falls back to `_plain_fallback()` — a small, code-fence-aware stripper that
+   sends a plain-text message so a reply is never dropped.
 
----
-
-## What Works in PTB 22.8 (Current Brainy Path)
-
-| Feature | Implementation |
-|---------|----------------|
-| Bold/Italic/Underline/Strikethrough/Spoiler | `parse_mode=MARKDOWN_V2` + `escape_markdown_v2()` |
-| Inline code | `\`code\`` via MarkdownV2 |
-| Code blocks with language | `\`\`\`python` + `_extract_code_to_files()` for large blocks |
-| Blockquotes | `>` prefix or `MessageEntity.BLOCKQUOTE` / `EXPANDABLE_BLOCKQUOTE` |
-| Links | `[text](url)` or `TEXT_LINK` entity |
-| Math (LaTeX) | `$...$` inline, `$$...$$` display — **client-side only** |
-| Tables | Markdown `| a | b |\n|---|---|` |
-| Citations | Manual `[1]` in text + `[1]: URL` at bottom (handled by `_SOURCES_LINE`) |
-| Streaming | Same-ID `sendMessageDraft` fed by provider token deltas; typing fallback |
+Untrusted web content is still passed through
+`telegram_renderer.sanitize_untrusted_markdown()` before `send_rich()`, which
+strips model-echoed links/images (but leaves inline/fenced code untouched) —
+that security control is independent of the delivery mechanism and unchanged
+by this migration.
 
 ---
 
-## Raw API Required For
+## What Changed From the Previous Approach
 
-- Full rich-draft blocks (`sendRichMessageDraft`); Brainy currently streams plain drafts
-- Collapsible details (`RichBlockDetails`)
-- Native citations with clickable reference links (`RichTextReferenceLink`)
-- Rich message effects; paid broadcasts remain forbidden, ordinary effects are optional
-- Rich block tables with alignment/merging
-- Server-side math rendering guarantee
+| | Before | Now |
+|---|---|---|
+| Escaping | ~40 hand-written regexes (`escape_markdown_v2`) | None — entities are structured data |
+| Splitting long messages | Custom safe-cut logic guessing at entity boundaries | `telegramify`'s own splitter |
+| Long code blocks | `_extract_code_to_files` (2000-char threshold) | `telegramify`'s file boxes (30-line threshold) |
+| Failure fallback | 3-step MarkdownV2 re-escape, then a fallback that also stripped `*`/`\` from code | Single plain-text fallback that leaves code content alone |
+| Raw `sendRichMessage` (Bot API 10.1) | `telegram_renderer.RichMessageRenderer`, wired into `bot_data` but never actually called from any handler | Removed — dead code |
 
----
-
-## Brainy Stage 1 Decision
-
-Use raw `sendRichMessage` through PTB's supported `do_api_request`, guarded by a
-process-level circuit breaker and a `TELEGRAM_RICH_MESSAGES` switch. Fall back to the
-existing MarkdownV2/plain sender on unsupported, oversized, rejected, or transient
-calls.
-
-Rationale:
-- Zero external dependencies
-- Works on all Telegram clients (official + third-party)
-- No paid features (effects, Stars)
-- Native headings/lists/code/math are available today without waiting for a wrapper
-- Model-authored HTML, links and remote media are removed before either render path
-- A transport failure is ambiguous because Telegram has no send idempotency key;
-  delivery-first fallback can rarely duplicate a final rather than lose it
+The raw `sendRichMessage` path (`RichBlockCode`, `RichTextMathematicalExpression`,
+etc.) was audited and scaffolded but never reached from a real handler; it added
+a circuit breaker and a config flag (`TELEGRAM_RICH_MESSAGES`) with no live
+caller. Both were deleted rather than kept as unused surface area.
 
 ---
 
 ## Revisit Triggers
 
-- PTB release notes add typed `RichMessage` / `send_rich_message` wrappers
-- Bot API 11.x adds new rich block types
-- User demand for collapsible details or native citations exceeds manual workaround pain
+- `telegramify-markdown` stops covering a formatting case the model produces
+  (check its `markdownify`/`telegramify` test suite first).
+- PTB ships typed wrappers for Bot API 10.1 Rich Messages and there's a
+  concrete feature need (tables, collapsible sections, math) that entities
+  can't express.
 
 ---
 
 ## Files Referenced
 
-- `bot.py:153-206` — `escape_markdown_v2()` MarkdownV2 sanitizer
-- `bot.py:671-842` — `send_long_message()` with code extraction
-- `telegram_renderer.py` — safe raw rich sender and circuit breaker
-- `bot.py` — provider streaming, draft publisher and regular persistent fallback
-- `translations.json` — 29 keys × 8 locales, all present
+- `bot.py` — `send_rich()`, `_plain_fallback()`, `_first_http_url()`,
+  `_visible_link_preview()`
+- `telegram_renderer.py` — `sanitize_untrusted_markdown()` (untrusted web
+  content only)
+- `pyproject.toml` — `telegramify-markdown` dependency

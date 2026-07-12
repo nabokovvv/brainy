@@ -4,8 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from bot import send_long_message
-from telegram.constants import ParseMode
+from bot import send_rich
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,13 +108,12 @@ class PrivacyContractTests(unittest.TestCase):
                 pattern, runtime_text, f"Expected safe logging pattern '{pattern}' not found"
             )
 
-    def test_send_long_message_does_not_leak_content_in_logs(self) -> None:
-        """Verify send_long_message doesn't log message content (it logs nothing, which is correct)."""
+    def test_send_rich_does_not_leak_content_in_logs(self) -> None:
+        """Verify send_rich doesn't log message content (it logs nothing, which is correct)."""
 
         class FakeUpdate:
             def __init__(self):
-                self.effective_chat = MagicMock()
-                self.effective_chat.id = 999
+                self.effective_message = None
                 self.message = MagicMock()
                 self.message.reply_text = AsyncMock()
                 self.message.reply_document = AsyncMock()
@@ -124,7 +122,7 @@ class PrivacyContractTests(unittest.TestCase):
         sensitive_text = "Password: hunter2\n\nPrivate key:\n-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"
         import asyncio
 
-        asyncio.run(send_long_message(update, sensitive_text, parse_mode=ParseMode.MARKDOWN_V2))
+        asyncio.run(send_rich(update, sensitive_text))
         # If we get here without exception and no content was logged, test passes
         self.assertTrue(True)
 
