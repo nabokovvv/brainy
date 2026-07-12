@@ -82,7 +82,9 @@ class QueryPlannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed, ("eiffel tower height", "other"))
 
     def test_parse_empty_output_falls_back(self):
-        parsed = parse_planned_queries("<think>only thoughts</think>", "raw text", allow_second=False)
+        parsed = parse_planned_queries(
+            "<think>only thoughts</think>", "raw text", allow_second=False
+        )
         self.assertEqual(parsed, ("raw text",))
 
     def test_fallback_query_normalizes_whitespace(self):
