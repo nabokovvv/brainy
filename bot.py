@@ -871,7 +871,7 @@ async def fast_reply_handler(
         # and code blocks). send_rich converts CommonMark to Telegram entities.
         await send_rich(
             update,
-            f"{final_answer}\n\n{latency_badge}",
+            f"{_close_dangling_code_fence(final_answer)}\n\n{latency_badge}",
             reply_markup=feedback_keyboard,
             link_preview_options=_visible_link_preview(_first_http_url(final_answer)),
         )
@@ -1014,7 +1014,7 @@ async def grounded_web_reply_handler(
             f"{index}. [{_display_host(item.canonical_url)}]({item.canonical_url})"
             for index, item in enumerate(top_citations, start=1)
         ]
-        message = f"{safe_answer}\n\n{badge}"
+        message = f"{_close_dangling_code_fence(safe_answer)}\n\n{badge}"
         if source_lines:
             message += "\n\n" + "\n".join(source_lines)
         link_preview = (
@@ -1174,6 +1174,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # Code blocks with at least this many lines are delivered as a file attachment
 # instead of an inline ``pre`` block.
 _CODE_TO_FILE_MIN_LINES = 30
+
+
+def _close_dangling_code_fence(answer: str) -> str:
+    """Balance an unclosed ``` fence in model output before appending anything.
+
+    Token-truncated replies (and models that simply forget the closing fence)
+    leave an odd number of ``` markers. Without a closing fence, everything we
+    append afterwards - most visibly the latency badge - is swallowed into the
+    open code block and delivered as part of the code file instead of as text.
+    """
+
+    if answer.count("```") % 2:
+        return f"{answer}\n```"
+    return answer
 
 
 def _plain_fallback(text: str) -> str:

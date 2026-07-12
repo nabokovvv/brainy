@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bot import _first_http_url, _plain_fallback, send_rich
+from bot import _close_dangling_code_fence, _first_http_url, _plain_fallback, send_rich
 
 
 class FirstHttpUrlTests(unittest.TestCase):
@@ -37,6 +37,36 @@ class PlainFallbackTests(unittest.TestCase):
 
     def test_collapses_blank_lines(self):
         self.assertEqual(_plain_fallback("a\n\n\n\nb"), "a\n\nb")
+
+
+class CloseDanglingCodeFenceTests(unittest.TestCase):
+    def test_closes_unbalanced_fence(self):
+        self.assertEqual(_close_dangling_code_fence("```python\nx = 1"), "```python\nx = 1\n```")
+
+    def test_leaves_balanced_fence_untouched(self):
+        text = "```python\nx = 1\n```"
+        self.assertEqual(_close_dangling_code_fence(text), text)
+
+    def test_no_fence_untouched(self):
+        self.assertEqual(_close_dangling_code_fence("plain answer"), "plain answer")
+
+
+class BadgeSurvivesTruncatedCodeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_badge_is_separate_text_when_model_truncates_code(self):
+        # Long code block with a missing closing fence (token-truncated reply).
+        code = "\n".join(f"line_{i} = {i}" for i in range(40))
+        answer = f"Here:\n\n```python\n{code}"
+        badge = "⚡ 14.6s"
+        upd = FakeUpdate()
+        await send_rich(upd, f"{_close_dangling_code_fence(answer)}\n\n{badge}")
+        # Code goes to a file; the badge must arrive as its own text message,
+        # not swallowed into the file.
+        upd.message.reply_document.assert_called_once()
+        text_calls = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        self.assertTrue(any(badge in t for t in text_calls))
+        doc = upd.message.reply_document.call_args
+        sent_bytes = doc.args[0].input_file_content
+        self.assertNotIn(b"14.6s", sent_bytes)
 
 
 class FakeUpdate:
