@@ -103,6 +103,22 @@ class SendRichTests(unittest.IsolatedAsyncioTestCase):
         entities = upd.message.reply_text.call_args.kwargs.get("entities") or []
         self.assertTrue(any(getattr(e, "type", None) == "pre" for e in entities))
 
+    async def test_entities_are_ptb_objects_and_json_serializable(self):
+        # telegramify returns its own MessageEntity class; PTB wraps the JSON
+        # TypeError in NetworkError, killing every formatted send. Guard the
+        # conversion at the call boundary.
+        import json
+
+        from telegram import MessageEntity
+
+        upd = self._make_update()
+        await send_rich(upd, "Привет, **жирный** и `код` и *курсив*.")
+        entities = upd.message.reply_text.call_args.kwargs.get("entities") or []
+        self.assertTrue(entities, "expected formatting entities")
+        for entity in entities:
+            self.assertIsInstance(entity, MessageEntity)
+        json.dumps([e.to_dict() for e in entities])  # must not raise
+
     async def test_long_code_block_extracted_as_file(self):
         upd = self._make_update()
         code = "\n".join(f"line_{i} = {i}" for i in range(40))  # >= 30 lines

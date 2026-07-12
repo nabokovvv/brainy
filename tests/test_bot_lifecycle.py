@@ -37,6 +37,7 @@ def _load_bot_with_telegram_stub():
     telegram.InlineKeyboardMarkup = _DummyTelegramObject
     telegram.InputFile = _DummyTelegramObject
     telegram.LinkPreviewOptions = _DummyTelegramObject
+    telegram.MessageEntity = _DummyTelegramObject
     telegram.Update = type("Update", (), {"ALL_TYPES": object()})
 
     telegram_helpers = types.ModuleType("telegram.helpers")

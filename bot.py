@@ -16,8 +16,14 @@ from urllib.parse import urlparse
 import httpx
 import telegram.error
 from telegramify_markdown import ContentType, telegramify
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Update
-from telegram import InputFile
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile,
+    LinkPreviewOptions,
+    MessageEntity,
+    Update,
+)
 from telegram.constants import ChatAction
 from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 from telegram.ext import (
@@ -1199,6 +1205,30 @@ def _plain_fallback(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _to_ptb_entities(entities) -> list[MessageEntity] | None:
+    """Convert telegramify-markdown entities to PTB ``telegram.MessageEntity``.
+
+    telegramify returns its own MessageEntity class; PTB cannot JSON-serialize
+    foreign objects and wraps the resulting ``TypeError`` in ``NetworkError``,
+    so passing them through directly kills every send that carries formatting.
+    Offsets are already UTF-16 as Telegram requires.
+    """
+
+    if not entities:
+        return None
+    return [
+        MessageEntity(
+            type=entity.type,
+            offset=entity.offset,
+            length=entity.length,
+            url=entity.url,
+            language=entity.language,
+            custom_emoji_id=entity.custom_emoji_id,
+        )
+        for entity in entities
+    ]
+
+
 # Backoff (seconds) between retries of a transient Telegram transport failure.
 _SEND_RETRY_BACKOFF = (0.5, 1.0, 2.0)
 
@@ -1282,7 +1312,7 @@ async def send_rich(update, text: str, **kwargs):
                         reply_target.reply_document(
                             document,
                             caption=box.caption_text or None,
-                            caption_entities=box.caption_entities or None,
+                            caption_entities=_to_ptb_entities(box.caption_entities),
                             **doc_kwargs,
                         )
                     )
@@ -1290,7 +1320,7 @@ async def send_rich(update, text: str, **kwargs):
             else:
                 await _send_with_retry(
                     lambda box=box, send_kwargs=send_kwargs: reply_target.reply_text(
-                        box.text, entities=box.entities or None, **send_kwargs
+                        box.text, entities=_to_ptb_entities(box.entities), **send_kwargs
                     )
                 )
         except BadRequest as exc:
