@@ -115,8 +115,8 @@ class EvidenceGatewayTests(unittest.IsolatedAsyncioTestCase):
         regular = synthesizer.build_request("question", "en", bundle)
         detailed = synthesizer.build_request("question", "en", bundle, detailed=True)
 
-        self.assertEqual(regular.max_output_tokens, 500)
-        self.assertEqual(detailed.max_output_tokens, 900)
+        self.assertEqual(regular.max_output_tokens, 700)
+        self.assertEqual(detailed.max_output_tokens, 1000)
         self.assertIn("Compare sources", detailed.messages[0].content)
 
     async def test_synthesis_strips_think_trace_and_rejects_empty(self):

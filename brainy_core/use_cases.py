@@ -14,7 +14,7 @@ def build_fast_chat_request(
     *,
     persona: str = DEFAULT_PERSONA,
     history: Sequence[ChatMessage] = (),
-    max_output_tokens: int = 400,
+    max_output_tokens: int = 600,
 ) -> ChatRequest:
     """Build the direct local-chat request without routing or provider work.
 

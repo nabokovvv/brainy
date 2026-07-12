@@ -197,7 +197,7 @@ class GroundedSynthesizer:
                 *history,
                 ChatMessage(role="user", content=user_prompt),
             ),
-            max_output_tokens=900 if detailed else 500,
+            max_output_tokens=1000 if detailed else 700,
             temperature=0.2,
         )
 
