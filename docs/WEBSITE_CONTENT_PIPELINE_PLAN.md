@@ -38,7 +38,8 @@ provider-neutral inference/search contracts и безопасный page fetcher
 - создаётся новый private GitHub repository `askbrainy-publisher` (название можно
   поменять до создания): Astro source, Markdown content, pipeline code, prompts,
   job ledger schema, provider configuration and deployment infrastructure живут
-  только там;
+  только там; содержимое `Free_SEO_article_EN` лежит в его корне и не попадает в
+  public repositories;
 - Cloudflare получает доступ к private repo для build/deploy, но опубликованный
   static site остаётся публичным;
 - общие безопасные contracts можно позже вынести в public package, но private
@@ -59,11 +60,14 @@ provider-neutral inference/search contracts и безопасный page fetcher
 Следовательно, существующий контент не потерян, но миграция должна извлечь
 структурированные документы из HTML. Перенос вручную не нужен.
 
-Старый `Free_SEO_article_EN` полезен только как prototype/reference. В нём есть
-двухпроходная идея `facts + outline -> draft`, retry и run manifest, но нет topic
-discovery, translation, CMS integration, durable queue и безопасной публикации.
-Его URL fetcher, model selection, citation handling и QA нельзя переносить в
-production без переписывания.
+Твой `Free_SEO_article_EN` переносится в корень нового private repository как
+legacy working generator и сохраняется без публичной публикации. Это не throwaway
+prototype: его сильные части — `facts + outline -> draft`, retry/model rotation,
+gap analysis и run metadata — становятся первым writer backend через adapter.
+Остальные возможности добавляются вокруг него постепенно: topic discovery,
+translation, CMS frontmatter, durable queue, dedup и publish. Risky URL fetcher,
+model selection, citation handling и QA сначала работают в compatibility mode, а
+затем заменяются или ограничиваются безопасными contracts без поломки исходного CLI.
 
 ## Decision
 
@@ -271,6 +275,22 @@ Provider policy остаётся zero-cost и task-specific:
 - generation concurrency по умолчанию 1;
 - article jobs запускаются с низким приоритетом и не должны ухудшать Telegram SLO.
 
+### Legacy generator adapter
+
+Первый writer adapter принимает текущий CLI contract (`keyword`/brief/output) и
+запускает `Free_SEO_article_EN` в отдельном process boundary. Adapter:
+
+- не меняет исходные файлы и не печатает raw prompt/response в логи;
+- проверяет provider/model policy до запуска;
+- переводит результат в typed `ArticleDraft` и сохраняет фактически использованные
+  модели и stages в run manifest;
+- передаёт источники в общий evidence/citation validator;
+- пишет только private staging output, без скрытой публикации;
+- имеет recorded fixtures и compatibility test на текущем script output.
+
+Так мы начинаем с уже работающего English-writing path и заменяем risky stages
+последовательно, не теряя исходный CLI.
+
 ## Translation
 
 English публикуется первым. Переводы создаются независимыми resumable jobs для всех
@@ -345,6 +365,8 @@ Acceptance criteria:
 - этот ADR принят;
 - зафиксирован полный legacy URL/content/assets manifest;
 - выбран и создан private repository boundary до добавления publisher code;
+- `Free_SEO_article_EN` помещён в корень private repository, его checksum и
+  compatibility command зафиксированы;
 - известен фактический Cloudflare deployment source;
 - выбран Pages-retain или Workers Static Assets с зафиксированной причиной;
 - production DNS/deploy не менялись.
@@ -375,13 +397,15 @@ Acceptance criteria:
 - route/canonical/hreflang matrix green;
 - production ещё не переключён.
 
-### Slice W3 — pipeline core, automatic low-risk topic input
+### Slice W3 — legacy writer adapter and automatic low-risk topic input
 
 Scope: безопасный research/write pipeline для заданной темы, без cron и publish.
 
 Acceptance criteria:
 
 - typed job/evidence/article contracts;
+- compatibility adapter для `Free_SEO_article_EN` с сохранённым `facts -> outline ->
+  draft` path;
 - fake providers и recorded HTTP fixtures;
 - safe fetch/prompt injection/citation/price fail-closed tests;
 - facts -> outline -> draft -> QA resume;
