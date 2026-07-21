@@ -4,6 +4,7 @@ from brainy_core.inference import (
     ChatMessage,
     ChatRequest,
     ChatResult,
+    ChatStreamEvent,
     ProviderHealth,
     ProviderModel,
     ProviderUnavailableError,
@@ -36,7 +37,63 @@ class _Provider:
         self.closed = True
 
 
+class _StreamingProvider(_Provider):
+    def __init__(self, name: str, events=None, error=None):
+        super().__init__(name, error=error)
+        self.events = events or []
+
+    async def stream_chat(self, request):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        for event in self.events:
+            yield event
+
+
 class FallbackInferenceProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_uses_primary_and_preserves_actual_model(self):
+        actual = ProviderModel("omnirouter", "gemma-4-31b", False)
+        primary = _StreamingProvider(
+            "omnirouter",
+            [
+                ChatStreamEvent(delta="OK"),
+                ChatStreamEvent(result=ChatResult("OK", actual, 10)),
+            ],
+        )
+        fallback = _Provider(
+            "ollama", ChatResult("local", ProviderModel("ollama", "local", True), 20)
+        )
+        provider = FallbackInferenceProvider(primary, fallback)
+
+        events = [
+            event
+            async for event in provider.stream_chat(
+                ChatRequest(messages=(ChatMessage("user", "hello"),))
+            )
+        ]
+
+        self.assertEqual(events[0].delta, "OK")
+        self.assertEqual(events[-1].result.model.name, "gemma-4-31b")
+        self.assertEqual(fallback.calls, 0)
+
+    async def test_stream_failure_falls_back_to_ollama(self):
+        primary = _StreamingProvider(
+            "omnirouter", error=ProviderUnavailableError("omnirouter", 503)
+        )
+        local_model = ProviderModel("ollama", "gemma4:e2b", True)
+        fallback = _Provider("ollama", ChatResult("local", local_model, 20))
+        provider = FallbackInferenceProvider(primary, fallback)
+
+        events = [
+            event
+            async for event in provider.stream_chat(
+                ChatRequest(messages=(ChatMessage("user", "hello"),))
+            )
+        ]
+
+        self.assertEqual(events[-1].result.text, "local")
+        self.assertEqual(fallback.calls, 1)
+
     async def test_primary_result_and_actual_model_are_preserved(self):
         actual = ProviderModel("omnirouter", "vendor/actual-model", False)
         primary = _Provider("omnirouter", ChatResult("remote", actual, 10))
@@ -52,9 +109,7 @@ class FallbackInferenceProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fallback.calls, 0)
 
     async def test_provider_error_falls_back_to_ollama(self):
-        primary = _Provider(
-            "omnirouter", error=ProviderUnavailableError("omnirouter", 503)
-        )
+        primary = _Provider("omnirouter", error=ProviderUnavailableError("omnirouter", 503))
         local_model = ProviderModel("ollama", "gemma4:e2b", True)
         fallback = _Provider("ollama", ChatResult("local", local_model, 20))
         provider = FallbackInferenceProvider(primary, fallback)
