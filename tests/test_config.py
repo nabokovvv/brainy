@@ -27,9 +27,7 @@ class SettingsTests(unittest.TestCase):
             settings.validate()
 
     def test_omnirouter_alias_is_configured(self) -> None:
-        settings = Settings.from_env(
-            {"LLM_CLIENT": "omnirouter", "OMNIROUTER_API_KEY": "test-key"}
-        )
+        settings = Settings.from_env({"LLM_CLIENT": "omnirouter", "OMNIROUTER_API_KEY": "test-key"})
 
         settings.validate()
 

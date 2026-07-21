@@ -165,8 +165,14 @@ class OpenAICompatibleRemoteProvider:
         jitter: Callable[[float, float], float] = random.uniform,
     ) -> None:
         parsed = urlparse(base_url)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
-            raise ValueError("remote inference base_url must be a clean HTTPS URL")
+        is_loopback_http = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+        if (
+            (parsed.scheme != "https" and not is_loopback_http)
+            or not parsed.netloc
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("remote inference base_url must use HTTPS or loopback HTTP")
         if not provider_name.strip() or not api_key.strip() or not model.strip():
             raise ValueError("provider, API key, and model must be non-empty")
         if not 0 < timeout_seconds <= 120 or max_concurrency not in {1, 2}:

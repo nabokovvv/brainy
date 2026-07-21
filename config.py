@@ -83,9 +83,7 @@ class Settings:
         return cls(
             telegram_token=_optional_env(source.get("TELEGRAM_TOKEN")),
             llm_client=source.get("LLM_CLIENT", "ollama").strip().lower(),
-            omnirouter_base_url=source.get(
-                "OMNIROUTER_BASE_URL", "https://omniroute.vorobushek.app/v1"
-            )
+            omnirouter_base_url=source.get("OMNIROUTER_BASE_URL", "http://127.0.0.1:20131/v1")
             .strip()
             .rstrip("/"),
             omnirouter_api_key=_optional_env(source.get("OMNIROUTER_API_KEY")),
@@ -167,8 +165,12 @@ class Settings:
         if self.llm_client == "omnirouter":
             if not self.omnirouter_api_key:
                 errors.append("OMNIROUTER_API_KEY is required for OmniRouter inference")
-            if not self.omnirouter_base_url.startswith("https://"):
-                errors.append("OMNIROUTER_BASE_URL must use HTTPS")
+            if not (
+                self.omnirouter_base_url.startswith("https://")
+                or self.omnirouter_base_url.startswith("http://127.0.0.1:")
+                or self.omnirouter_base_url.startswith("http://localhost:")
+            ):
+                errors.append("OMNIROUTER_BASE_URL must use HTTPS or a loopback HTTP address")
             if not self.omnirouter_model:
                 errors.append("OMNIROUTER_MODEL must be non-empty")
             if not 0 < self.omnirouter_timeout_seconds <= 120:
