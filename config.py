@@ -51,6 +51,11 @@ def _optional_env(value: str | None) -> str | None:
 class Settings:
     telegram_token: str | None
     llm_client: str
+    omnirouter_base_url: str
+    omnirouter_api_key: str | None
+    omnirouter_model: str
+    omnirouter_timeout_seconds: float
+    omnirouter_context_tokens: int
     ollama_base_url: str
     ollama_model: str
     ollama_timeout_seconds: float
@@ -78,6 +83,23 @@ class Settings:
         return cls(
             telegram_token=_optional_env(source.get("TELEGRAM_TOKEN")),
             llm_client=source.get("LLM_CLIENT", "ollama").strip().lower(),
+            omnirouter_base_url=source.get(
+                "OMNIROUTER_BASE_URL", "https://omniroute.vorobushek.app/v1"
+            )
+            .strip()
+            .rstrip("/"),
+            omnirouter_api_key=_optional_env(source.get("OMNIROUTER_API_KEY")),
+            omnirouter_model=source.get("OMNIROUTER_MODEL", "brainy-fast").strip(),
+            omnirouter_timeout_seconds=_env_float(
+                source.get("OMNIROUTER_TIMEOUT"),
+                default=60.0,
+                name="OMNIROUTER_TIMEOUT",
+            ),
+            omnirouter_context_tokens=_env_int(
+                source.get("OMNIROUTER_CONTEXT_TOKENS"),
+                default=65_536,
+                name="OMNIROUTER_CONTEXT_TOKENS",
+            ),
             ollama_base_url=source.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
             .strip()
             .rstrip("/"),
@@ -140,10 +162,19 @@ class Settings:
         if require_telegram and not self.telegram_token:
             errors.append("TELEGRAM_TOKEN is required to run the Telegram bot")
 
-        if self.llm_client != "ollama":
-            errors.append(
-                "LLM_CLIENT must remain 'ollama' until Stage 3 enforces free-only remote routing"
-            )
+        if self.llm_client not in {"omnirouter", "ollama"}:
+            errors.append("LLM_CLIENT must be 'omnirouter' or 'ollama'")
+        if self.llm_client == "omnirouter":
+            if not self.omnirouter_api_key:
+                errors.append("OMNIROUTER_API_KEY is required for OmniRouter inference")
+            if not self.omnirouter_base_url.startswith("https://"):
+                errors.append("OMNIROUTER_BASE_URL must use HTTPS")
+            if not self.omnirouter_model:
+                errors.append("OMNIROUTER_MODEL must be non-empty")
+            if not 0 < self.omnirouter_timeout_seconds <= 120:
+                errors.append("OMNIROUTER_TIMEOUT must be between 0 and 120 seconds")
+            if not 1 <= self.omnirouter_context_tokens <= 65536:
+                errors.append("OMNIROUTER_CONTEXT_TOKENS must be between 1 and 65536")
 
         if not self.ollama_base_url:
             errors.append("OLLAMA_BASE_URL must be non-empty")

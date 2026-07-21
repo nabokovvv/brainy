@@ -63,7 +63,12 @@ from brainy_core.memory import (
     is_valid_budget,
 )
 from brainy_core.feedback import FeedbackEntry, FeedbackStore
-from brainy_core.providers import OllamaProvider
+from brainy_core.providers import (
+    DailyRequestBudget,
+    FallbackInferenceProvider,
+    OllamaProvider,
+    OpenAICompatibleRemoteProvider,
+)
 from brainy_core.query_planner import plan_search_queries
 from brainy_core.providers.web_search import RotatingSearchProvider, build_rotating_provider
 from brainy_core.scheduling import StablePriorityQueue
@@ -1543,7 +1548,7 @@ async def _best_effort_cleanup(label: str, operation) -> None:
 
 async def main_async() -> None:
     config.SETTINGS.validate(require_telegram=True)
-    logger.info("Using local Ollama provider")
+    logger.info("Configuring inference client=%s", config.SETTINGS.llm_client)
     settings_path = Path(config.SETTINGS.user_settings_path).expanduser()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_repo = AsyncUserSettingsRepo(SQLiteUserSettingsRepo(str(settings_path)))
@@ -1561,12 +1566,31 @@ async def main_async() -> None:
         whisper_transcriber = WhisperTranscriber(config.WHISPER_MODEL)
     worker_count = 3
 
-    inference_provider = OllamaProvider(
+    ollama_provider = OllamaProvider(
         base_url=config.OLLAMA_BASE_URL,
         model=config.OLLAMA_MODEL,
         timeout_seconds=config.OLLAMA_TIMEOUT,
         context_window=config.OLLAMA_CONTEXT_TOKENS,
     )
+    if config.SETTINGS.llm_client == "omnirouter":
+        omnirouter_provider = OpenAICompatibleRemoteProvider(
+            provider_name="omnirouter",
+            base_url=config.SETTINGS.omnirouter_base_url,
+            api_key=config.SETTINGS.omnirouter_api_key or "",
+            model=config.SETTINGS.omnirouter_model,
+            budget=DailyRequestBudget(
+                Path("~/.local/state/brainy/omnirouter_budget.json").expanduser(),
+                provider="omnirouter",
+                limit=1_000_000,
+            ),
+            timeout_seconds=config.SETTINGS.omnirouter_timeout_seconds,
+            context_window=config.SETTINGS.omnirouter_context_tokens,
+        )
+        inference_provider = FallbackInferenceProvider(
+            omnirouter_provider, ollama_provider
+        )
+    else:
+        inference_provider = ollama_provider
 
     # Search resources are created once per process and shared by the Web ON
     # gateway. Providers do not perform network I/O during construction.

@@ -1,5 +1,6 @@
 """Inference provider adapters."""
 
+from brainy_core.providers.fallback import FallbackInferenceProvider
 from brainy_core.providers.ollama import OllamaProvider
 from brainy_core.providers.remote import (
     NVIDIA_BASE_URL,
@@ -14,6 +15,7 @@ __all__ = [
     "NVIDIA_BASE_URL",
     "OPENROUTER_BASE_URL",
     "DailyRequestBudget",
+    "FallbackInferenceProvider",
     "MinuteRateBudget",
     "OllamaProvider",
     "OpenAICompatibleRemoteProvider",

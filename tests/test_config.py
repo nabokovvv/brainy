@@ -20,6 +20,21 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(settings.web_enabled_default)
         self.assertEqual(settings.whisper_backend, "cpp")
 
+    def test_omnirouter_requires_key_when_enabled(self) -> None:
+        settings = Settings.from_env({"LLM_CLIENT": "omnirouter"})
+
+        with self.assertRaisesRegex(ConfigurationError, "OMNIROUTER_API_KEY"):
+            settings.validate()
+
+    def test_omnirouter_alias_is_configured(self) -> None:
+        settings = Settings.from_env(
+            {"LLM_CLIENT": "omnirouter", "OMNIROUTER_API_KEY": "test-key"}
+        )
+
+        settings.validate()
+
+        self.assertEqual(settings.omnirouter_model, "brainy-fast")
+
     def test_python_whisper_is_an_explicit_development_override(self) -> None:
         settings = Settings.from_env({"WHISPER_BACKEND": "python"})
 
@@ -65,12 +80,12 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "WHISPER_CPP"):
             settings.validate()
 
-    def test_remote_provider_is_fail_closed_until_free_only_routing_exists(self) -> None:
+    def test_unknown_remote_provider_is_rejected(self) -> None:
         settings = Settings.from_env(
             {"LLM_CLIENT": "together", "TOGETHER_AI_API_KEY": "not-a-real-key"}
         )
 
-        with self.assertRaisesRegex(ConfigurationError, "Stage 3"):
+        with self.assertRaisesRegex(ConfigurationError, "omnirouter.*ollama"):
             settings.validate()
 
     def test_legacy_yandex_backend_is_removed(self) -> None:
