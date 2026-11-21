@@ -12,6 +12,7 @@ import httpx
 from brainy_core.providers.web_search import (
     BraveSearchProvider,
     MonthlyQuotaLedger,
+    OmniRouteSearchProvider,
     ProviderAuthError,
     ProviderConfig,
     RotatingSearchProvider,
@@ -62,6 +63,57 @@ class WebProviderMappingTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual([result[0].snippet for result in results], ["brave", "tavily", "serp"])
+
+    async def test_omniroute_bounds_and_cleans_oversized_results(self) -> None:
+        huge = "<p>First&nbsp; sentence.</p>\n" + ("very long content " * 200)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/v1/search")
+            self.assertEqual(request.headers["authorization"], "Bearer secret")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["query"], "question")
+            self.assertEqual(payload["limit"], 2)
+            return httpx.Response(
+                200,
+                json={
+                    "provider": "ollama-search",
+                    "results": [
+                        {
+                            "title": " One ",
+                            "url": "https://one.example/a",
+                            "snippet": huge,
+                            "content": huge,
+                        },
+                        {
+                            "title": "Duplicate",
+                            "url": "https://one.example/a",
+                            "snippet": "duplicate",
+                        },
+                        {
+                            "title": "Two",
+                            "url": "https://two.example",
+                            "snippet": "",
+                            "content": "fallback content",
+                        },
+                        {"title": "Three", "url": "https://three.example", "snippet": "ignored"},
+                    ],
+                },
+            )
+
+        query = SearchQuery("question", "en", limit=2)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            results = await OmniRouteSearchProvider(
+                client,
+                "http://127.0.0.1:20131/v1",
+                "secret",
+            ).search(query)
+
+        self.assertEqual([result.title for result in results], ["One", "Two"])
+        self.assertEqual([result.rank for result in results], [1, 2])
+        self.assertNotIn("<p>", results[0].snippet)
+        self.assertNotIn("&nbsp;", results[0].snippet)
+        self.assertLessEqual(len(results[0].snippet), 800)
+        self.assertEqual(results[1].snippet, "fallback content")
 
 
 class RotationTests(unittest.IsolatedAsyncioTestCase):

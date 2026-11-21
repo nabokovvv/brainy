@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
+import re
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -178,6 +180,53 @@ class BraveSearchProvider:
         return None
 
 
+class OmniRouteSearchProvider:
+    """Bounded adapter for OmniRoute's verbose OpenAI-style search endpoint."""
+
+    name = "omniroute"
+    _snippet_limit = 800
+
+    def __init__(self, client: httpx.AsyncClient, base_url: str, api_key: str) -> None:
+        self._client = client
+        self._url = f"{base_url.rstrip('/').removesuffix('/v1')}/v1/search"
+        self._api_key = api_key
+
+    async def search(self, request: SearchQuery) -> Sequence[SearchResult]:
+        response = await _request(
+            self._client,
+            self._url,
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            json={"query": request.query, "limit": request.limit},
+        )
+        payload = _json_object(response)
+        items = payload.get("results", [])
+        if not isinstance(items, list):
+            raise TransientSearchError("Search provider returned invalid results")
+
+        results: list[SearchResult] = []
+        seen: set[str] = set()
+        for item in items:
+            if len(results) >= request.limit:
+                break
+            if not isinstance(item, Mapping):
+                continue
+            title = _clean_text(item.get("title"), 300)
+            url = str(item.get("url") or "").strip()
+            snippet = _clean_text(item.get("snippet") or item.get("content"), self._snippet_limit)
+            if not title or not url or not snippet or url in seen:
+                continue
+            try:
+                result = SearchResult(title, url, snippet, len(results) + 1, self.name)
+            except ValueError:
+                continue
+            seen.add(url)
+            results.append(result)
+        return tuple(results)
+
+    async def aclose(self) -> None:
+        return None
+
+
 class TavilySearchProvider:
     name = "tavily"
 
@@ -300,6 +349,11 @@ def build_rotating_provider(
             ProviderConfig("serpapi", settings.serpapi_api_key, settings.serpapi_monthly_limit)
             if settings.serpapi_api_key
             else None,
+            ProviderConfig(
+                "omniroute", settings.omnirouter_api_key, settings.omnirouter_search_monthly_limit
+            )
+            if settings.omnirouter_api_key
+            else None,
         )
         if provider is not None
     )
@@ -309,11 +363,23 @@ def build_rotating_provider(
         "brave": BraveSearchProvider(client, settings.brave_search_api_key or ""),
         "tavily": TavilySearchProvider(client, settings.tavily_api_key or ""),
         "serpapi": SerpApiSearchProvider(client, settings.serpapi_api_key or ""),
+        "omniroute": OmniRouteSearchProvider(
+            client, settings.omnirouter_base_url, settings.omnirouter_api_key or ""
+        ),
     }
     return RotatingSearchProvider(
         tuple((item, adapters[item.name]) for item in provider_configs),
         MonthlyQuotaLedger(settings.search_quota_state_path, provider_configs),
     )
+
+
+def _clean_text(value: Any, limit: int) -> str:
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]*>", " ", text)
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
 
 
 async def _request(client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:

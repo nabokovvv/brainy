@@ -75,6 +75,7 @@ class Settings:
     tavily_monthly_limit: int
     serpapi_api_key: str | None
     serpapi_monthly_limit: int
+    omnirouter_search_monthly_limit: int
     user_settings_path: str
 
     @classmethod
@@ -147,6 +148,11 @@ class Settings:
             serpapi_api_key=_optional_env(source.get("SERPAPI_API_KEY")),
             serpapi_monthly_limit=_env_int(
                 source.get("SERPAPI_MONTHLY_LIMIT"), default=200, name="SERPAPI_MONTHLY_LIMIT"
+            ),
+            omnirouter_search_monthly_limit=_env_int(
+                source.get("OMNIROUTER_SEARCH_MONTHLY_LIMIT"),
+                default=1000,
+                name="OMNIROUTER_SEARCH_MONTHLY_LIMIT",
             ),
             user_settings_path=source.get(
                 "USER_SETTINGS_PATH", "~/.local/state/brainy/settings.sqlite3"
