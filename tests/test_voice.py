@@ -8,7 +8,14 @@ import textwrap
 import time
 import unittest
 
-from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber, WhisperTranscriptionError
+from pathlib import Path
+
+from brainy_core.voice import (
+    RumbleTranscriber,
+    WhisperCppTranscriber,
+    WhisperTranscriber,
+    WhisperTranscriptionError,
+)
 
 
 class FakeWhisperModel:
@@ -271,6 +278,76 @@ class WhisperCppTranscriberTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(WhisperTranscriptionError, "failed"):
             await transcriber.transcribe("voice.oga", language="en")
+
+
+class _RumbleProcess:
+    def __init__(self, returncode: int = 0) -> None:
+        self.returncode = returncode
+
+    async def wait(self) -> int:
+        return self.returncode
+
+
+class _FallbackTranscriber:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def transcribe(self, audio_path: str, *, language: str) -> str:
+        self.calls.append((audio_path, language))
+        return "fallback text"
+
+
+class RumbleTranscriberTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runs_script_with_language_and_returns_output_file_text(self) -> None:
+        calls: list[tuple[object, ...]] = []
+
+        async def factory(*args: object, **_: object) -> _RumbleProcess:
+            calls.append(args)
+            Path(str(args[3])).write_text("  rumble text  \n", encoding="utf-8")
+            return _RumbleProcess()
+
+        fallback = _FallbackTranscriber()
+        transcriber = RumbleTranscriber(
+            python_executable="py", script_path="t.py", fallback=fallback, process_factory=factory
+        )
+
+        text = await transcriber.transcribe("voice.oga", language="ru")
+
+        self.assertEqual(text, "rumble text")
+        self.assertEqual(calls[0][:3], ("py", "t.py", "voice.oga"))
+        self.assertEqual(calls[0][4:], ("ru", "--no-fallback"))
+        self.assertFalse(Path(str(calls[0][3])).exists())
+        self.assertEqual(fallback.calls, [])
+
+    async def test_failure_or_empty_output_uses_fallback(self) -> None:
+        for returncode in (1, 0):
+
+            async def factory(
+                *_: object, returncode: int = returncode, **__: object
+            ) -> _RumbleProcess:
+                return _RumbleProcess(returncode)
+
+            fallback = _FallbackTranscriber()
+            transcriber = RumbleTranscriber(
+                python_executable="py",
+                script_path="t.py",
+                fallback=fallback,
+                process_factory=factory,
+            )
+
+            self.assertEqual(await transcriber.transcribe("v.oga", language="en"), "fallback text")
+            self.assertEqual(fallback.calls, [("v.oga", "en")])
+
+    async def test_failure_without_fallback_is_a_safe_error(self) -> None:
+        async def factory(*_: object, **__: object) -> _RumbleProcess:
+            return _RumbleProcess(2)
+
+        transcriber = RumbleTranscriber(
+            python_executable="py", script_path="t.py", process_factory=factory
+        )
+
+        with self.assertRaisesRegex(WhisperTranscriptionError, "Rumble"):
+            await transcriber.transcribe("v.oga", language="en")
 
 
 if __name__ == "__main__":

@@ -122,6 +122,75 @@ class WhisperCppTranscriber:
             await asyncio.wait_for(process.wait(), timeout=5)
 
 
+class RumbleTranscriber:
+    """Run the local Rumble-2-Flash script per voice note; fall back to another transcriber.
+
+    The script loads the model on the Apple GPU, writes the transcript, and exits, so no
+    model stays resident between voice notes.
+    """
+
+    def __init__(
+        self,
+        *,
+        python_executable: str | Path,
+        script_path: str | Path,
+        fallback: Any | None = None,
+        timeout: float = 120,
+        process_factory: Callable[..., Any] = asyncio.create_subprocess_exec,
+    ) -> None:
+        if not all(str(value).strip() for value in (python_executable, script_path)):
+            raise ValueError("Rumble python and script paths must be non-empty.")
+        self._python = str(Path(python_executable).expanduser())
+        self._script = str(Path(script_path).expanduser())
+        self._fallback = fallback
+        self._timeout = timeout
+        self._process_factory = process_factory
+        self._transcribe_lock = asyncio.Lock()
+
+    async def transcribe(self, audio_path: str | Path, *, language: str) -> str:
+        path = str(audio_path)
+        if not path or not language.strip():
+            raise ValueError("Audio path and language must be non-empty.")
+        try:
+            async with self._transcribe_lock:
+                return await self._run_rumble(path, language)
+        except WhisperTranscriptionError:
+            if self._fallback is None:
+                raise
+            return await self._fallback.transcribe(path, language=language)
+
+    async def _run_rumble(self, path: str, language: str) -> str:
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as temporary:
+            output_path = Path(temporary.name)
+        try:
+            process = await self._process_factory(
+                self._python,
+                self._script,
+                path,
+                str(output_path),
+                language,
+                "--no-fallback",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await asyncio.wait_for(process.wait(), timeout=self._timeout)
+            except asyncio.CancelledError:
+                await WhisperCppTranscriber._stop_process(process)
+                raise
+            except TimeoutError as exc:
+                await WhisperCppTranscriber._stop_process(process)
+                raise WhisperTranscriptionError("Rumble transcription timed out.") from exc
+            if process.returncode != 0:
+                raise WhisperTranscriptionError("Rumble transcription failed.")
+            text = output_path.read_text(encoding="utf-8", errors="replace").strip()
+        finally:
+            output_path.unlink(missing_ok=True)
+        if not text:
+            raise WhisperTranscriptionError("Rumble returned an empty transcription.")
+        return text
+
+
 def _load_whisper_model(model_name: str) -> WhisperModel:
     import torch
     import whisper

@@ -65,6 +65,8 @@ class Settings:
     whisper_cpp_executable: str
     whisper_cpp_model: str
     whisper_cpp_ffmpeg: str
+    rumble_python: str
+    rumble_script: str
     web_enabled_default: bool
     search_backend: str
     search_fallback_backend: str
@@ -127,6 +129,12 @@ class Settings:
                 "~/Library/Application Support/Brainy/models/whisper/ggml-large-v3.bin",
             ).strip(),
             whisper_cpp_ffmpeg=source.get("WHISPER_CPP_FFMPEG", "/opt/homebrew/bin/ffmpeg").strip(),
+            rumble_python=source.get(
+                "RUMBLE_PYTHON", "~/services/stt-rumble/.venv/bin/python"
+            ).strip(),
+            rumble_script=source.get(
+                "RUMBLE_SCRIPT", "~/services/stt-rumble/transcribe.py"
+            ).strip(),
             web_enabled_default=_env_bool(source.get("WEB_ENABLED_DEFAULT"), default=False),
             search_backend=source.get("SEARCH_BACKEND", "disabled").strip().lower(),
             search_fallback_backend=source.get("SEARCH_FALLBACK_BACKEND", "disabled")
@@ -197,9 +205,11 @@ class Settings:
             errors.append("WHISPER_MODEL must be non-empty")
         if not self.user_settings_path.strip():
             errors.append("USER_SETTINGS_PATH must be non-empty")
-        if self.whisper_backend not in {"python", "cpp"}:
-            errors.append("WHISPER_BACKEND must be 'python' or 'cpp'")
-        if self.whisper_backend == "cpp":
+        if self.whisper_backend not in {"python", "cpp", "rumble"}:
+            errors.append("WHISPER_BACKEND must be 'python', 'cpp' or 'rumble'")
+        if self.whisper_backend == "rumble" and not (self.rumble_python and self.rumble_script):
+            errors.append("RUMBLE_PYTHON and RUMBLE_SCRIPT must be non-empty")
+        if self.whisper_backend in {"cpp", "rumble"}:
             if not self.whisper_cpp_executable:
                 errors.append("WHISPER_CPP_EXECUTABLE must be non-empty")
             if not self.whisper_cpp_model:
@@ -249,6 +259,8 @@ WHISPER_BACKEND = SETTINGS.whisper_backend
 WHISPER_CPP_EXECUTABLE = SETTINGS.whisper_cpp_executable
 WHISPER_CPP_MODEL = SETTINGS.whisper_cpp_model
 WHISPER_CPP_FFMPEG = SETTINGS.whisper_cpp_ffmpeg
+RUMBLE_PYTHON = SETTINGS.rumble_python
+RUMBLE_SCRIPT = SETTINGS.rumble_script
 
 # Dormant research defaults. These utilities are not imported by the fast runtime;
 # Stage 2 will replace module globals with injected adapter settings.

@@ -33,6 +33,13 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.omnirouter_model, "brainy-fast")
 
+    def test_rumble_backend_is_accepted_with_default_paths(self) -> None:
+        settings = Settings.from_env({"WHISPER_BACKEND": " Rumble "})
+
+        settings.validate(require_telegram=False)
+        self.assertEqual(settings.whisper_backend, "rumble")
+        self.assertTrue(settings.rumble_script.endswith("transcribe.py"))
+
     def test_python_whisper_is_an_explicit_development_override(self) -> None:
         settings = Settings.from_env({"WHISPER_BACKEND": "python"})
 

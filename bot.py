@@ -73,7 +73,7 @@ from brainy_core.query_planner import plan_search_queries
 from brainy_core.providers.web_search import RotatingSearchProvider, build_rotating_provider
 from brainy_core.scheduling import StablePriorityQueue
 from brainy_core.source_exploration import SourceExploration, SourceExplorationStore
-from brainy_core.voice import WhisperCppTranscriber, WhisperTranscriber
+from brainy_core.voice import RumbleTranscriber, WhisperCppTranscriber, WhisperTranscriber
 from localization import Translator
 from page_processor import PageFetcher
 from telegram_renderer import sanitize_untrusted_markdown
@@ -1556,12 +1556,18 @@ async def main_async() -> None:
     translator = Translator("translations.json")
     request_queue = StablePriorityQueue(maxsize=100)
     llm_semaphore = asyncio.Semaphore(1)
-    if config.WHISPER_BACKEND == "cpp":
+    if config.WHISPER_BACKEND in {"cpp", "rumble"}:
         whisper_transcriber = WhisperCppTranscriber(
             executable=config.WHISPER_CPP_EXECUTABLE,
             model_path=config.WHISPER_CPP_MODEL,
             ffmpeg_executable=config.WHISPER_CPP_FFMPEG,
         )
+        if config.WHISPER_BACKEND == "rumble":
+            whisper_transcriber = RumbleTranscriber(
+                python_executable=config.RUMBLE_PYTHON,
+                script_path=config.RUMBLE_SCRIPT,
+                fallback=whisper_transcriber,
+            )
     else:
         whisper_transcriber = WhisperTranscriber(config.WHISPER_MODEL)
     worker_count = 3
