@@ -434,6 +434,10 @@ def _chat_result(data: Mapping[str, Any], model: ProviderModel, latency_ms: floa
 def _stream_fields(data: object) -> tuple[str, str | None, str | None]:
     if not isinstance(data, Mapping):
         raise ProviderResponseError("remote")
+    if data.get("choices") == []:
+        # Final usage chunk from ``stream_options.include_usage`` carries no choices.
+        response_model = data.get("model")
+        return "", None, response_model if isinstance(response_model, str) else None
     try:
         choice = data["choices"][0]
         delta = choice.get("delta", {}).get("content") or ""

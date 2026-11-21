@@ -158,6 +158,7 @@ class RemoteInferenceTests(unittest.IsolatedAsyncioTestCase):
                 content=(
                     b'data: {"model":"vendor/model:free","choices":[{"delta":{"content":"Hola"}}]}\n\n'
                     b'data: {"choices":[{"delta":{"content":"."},"finish_reason":"stop"}]}\n\n'
+                    b'data: {"choices":[],"usage":{"total_tokens":3}}\n\n'
                     b"data: [DONE]\n\n"
                 ),
                 request=request,
